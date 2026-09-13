@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import Pots from './src/views/Pots';
 
 export default function App() {
   const [tabAtiva, setTabAtiva] = useState('home');
@@ -76,12 +78,7 @@ export default function App() {
           </View>
         )}
 
-        {tabAtiva === 'int5' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>📊 Orçamento 3 Potes (Integrante 5)</Text>
-            <Text style={styles.cardDesc}>Três barras de progresso visuais (50% Necessidades, 30% Estilo de Vida, 20% Dívidas).</Text>
-          </View>
-        )}
+        {tabAtiva === 'int5' && <Pots />}
       </ScrollView>
     </SafeAreaView>
   );

@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import ProfileView from './src/views/ProfileView';
 import SubscriptionsView from './src/views/SubscriptionsView';
 import SweatHoursView from './src/views/SweatHoursView';
+import CooldownView from './src/views/CooldownView';
 import Pots from './src/views/Pots';
 
 export default function App() {
@@ -79,16 +80,7 @@ export default function App() {
 
         {tabAtiva === 'detox' && <SubscriptionsView />}
 
-        {tabAtiva === 'cooldown' && (
-          <ScrollView style={styles.placeholderContainer}>
-            <View style={styles.cardPlaceholder}>
-              <Text style={styles.cardTitle}>Cooldown 48h</Text>
-              <Text style={styles.cardDesc}>
-                Módulo de quarentena moral e avaliação reflexiva para retenção de compras por impulso.
-              </Text>
-            </View>
-          </ScrollView>
-        )}
+        {tabAtiva === 'cooldown' && <CooldownView />}
 
         {tabAtiva === 'potes' && (
           <ScrollView style={styles.placeholderContainer}>

@@ -40,6 +40,7 @@ export const ApiService = {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileData)
+        
       });
       if (response.ok) {
         const json = await response.json();
@@ -71,7 +72,47 @@ export const ApiService = {
         horasMensais: hor,
         valorHora: Number((sal / hor).toFixed(2))
       };
-      return { success: true, data: mockProfile, message: 'Perfil atualizado offline!' };
+            return { success: true, data: mockProfile, message: 'Perfil atualizado offline!' };
     }
+  },
+
+  // Listar assinaturas + economia acumulada
+  getSubscriptions: async () => {
+    const response = await fetch(`${API_BASE_URL}/subscriptions`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao buscar assinaturas.');
+    }
+    return json.data; // { subscriptions, economia }
+  },
+
+  // Alternar status ativo/cancelado de uma assinatura
+  toggleSubscription: async (id) => {
+    const response = await fetch(`${API_BASE_URL}/subscriptions/${id}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao atualizar assinatura.');
+    }
+    return json.data;
+  },
+
+  // Cadastrar nova assinatura
+  createSubscription: async (nome, valorMensal) => {
+    const response = await fetch(`${API_BASE_URL}/subscriptions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, valorMensal })
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao criar assinatura.');
+    }
+    return json.data;
   }
 };

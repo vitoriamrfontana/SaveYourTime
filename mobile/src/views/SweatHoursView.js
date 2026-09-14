@@ -39,7 +39,6 @@ export default function SweatHoursView({ perfil }) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.badge}>INTEGRANTE 2 - HORAS DE SUOR (Arthur)</Text>
       <Text style={styles.title}>Horas de Suor</Text>
       <Text style={styles.subtitle}>Descubra quanto tempo da sua vida você vai trabalhar para pagar um item.</Text>
 
@@ -114,7 +113,6 @@ export default function SweatHoursView({ perfil }) {
 
 const styles = StyleSheet.create({
   card: { backgroundColor: '#1e293b', borderRadius: 16, padding: 20, marginBottom: 16, borderLeftWidth: 4, borderLeftColor: '#f59e0b', elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4 },
-  badge: { color: '#f59e0b', fontSize: 11, fontWeight: 'bold', letterSpacing: 1, marginBottom: 6 },
   title: { fontSize: 22, fontWeight: 'bold', color: '#f8fafc', marginBottom: 6 },
   subtitle: { fontSize: 14, color: '#94a3b8', marginBottom: 12, lineHeight: 20 },
   sectionTitle: { fontSize: 13, color: '#cbd5e1', marginBottom: 8, fontWeight: '600' },

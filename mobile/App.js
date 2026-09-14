@@ -1,103 +1,121 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import ProfileView from './src/views/ProfileView';
+import SubscriptionsView from './src/views/SubscriptionsView';
+import SweatHoursView from './src/views/SweatHoursView';
+import Pots from './src/views/Pots';
 
 export default function App() {
-  const [tabAtiva, setTabAtiva] = useState('home');
+  const [tabAtiva, setTabAtiva] = useState('profile');
+  const [userProfile, setUserProfile] = useState(null);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
-      
-      {/* Header do App */}
+
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>⏳ Save your Time</Text>
+        <Text style={styles.headerTitle}>Save your Time</Text>
         <Text style={styles.headerSubtitle}>Gestão Financeira e Consumo Consciente</Text>
       </View>
 
-      {/* Menu de Navegação entre Módulos (Integrantes) */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.navBar}>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'home' && styles.navActive]} onPress={() => setTabAtiva('home')}>
-          <Text style={styles.navText}>Visão Geral</Text>
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'profile' && styles.navActive]}
+          onPress={() => setTabAtiva('profile')}
+        >
+          <Text style={[styles.navText, tabAtiva === 'profile' && styles.navTextActive]}>
+            Perfil
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'int1' && styles.navActive]} onPress={() => setTabAtiva('int1')}>
-          <Text style={styles.navText}>Perfil / Salário</Text>
+
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'suor' && styles.navActive]}
+          onPress={() => setTabAtiva('suor')}
+        >
+          <Text style={[styles.navText, tabAtiva === 'suor' && styles.navTextActive]}>
+            Horas de Suor
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'int2' && styles.navActive]} onPress={() => setTabAtiva('int2')}>
-          <Text style={styles.navText}>Horas de Suor</Text>
+
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'detox' && styles.navActive]}
+          onPress={() => setTabAtiva('detox')}
+        >
+          <Text style={[styles.navText, tabAtiva === 'detox' && styles.navTextActive]}>
+            Detox Assinaturas
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'int3' && styles.navActive]} onPress={() => setTabAtiva('int3')}>
-          <Text style={styles.navText}>Detox Assinaturas</Text>
+
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'cooldown' && styles.navActive]}
+          onPress={() => setTabAtiva('cooldown')}
+        >
+          <Text style={[styles.navText, tabAtiva === 'cooldown' && styles.navTextActive]}>
+            Cooldown 48h
+          </Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'int4' && styles.navActive]} onPress={() => setTabAtiva('int4')}>
-          <Text style={styles.navText}>Cooldown 48h</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.navButton, tabAtiva === 'int5' && styles.navActive]} onPress={() => setTabAtiva('int5')}>
-          <Text style={styles.navText}>3 Potes 50-30-20</Text>
+
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'potes' && styles.navActive]}
+          onPress={() => setTabAtiva('potes')}
+        >
+          <Text style={[styles.navText, tabAtiva === 'potes' && styles.navTextActive]}>
+            3 Potes (50-30-20)
+          </Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Área de Conteúdo da Tab */}
-      <ScrollView style={styles.content}>
-        {tabAtiva === 'home' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>🚀 Estrutura Base do MVP Pronta!</Text>
-            <Text style={styles.cardDesc}>
-              O repositório do projeto está configurado. Cada integrante possui sua respectiva aba e rota no backend pronta para receber os códigos da Sprint 1 amanhã!
-            </Text>
-          </View>
+      <View style={styles.mainContent}>
+        {tabAtiva === 'profile' && (
+          <ProfileView onProfileUpdated={(updated) => setUserProfile(updated)} />
         )}
 
-        {tabAtiva === 'int1' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>👤 Perfil & Carga Horária (Integrante 1)</Text>
-            <Text style={styles.cardDesc}>Formulário para definir salário mensal e carga horária. Cálculo automático da "Valor da Hora".</Text>
-          </View>
+        {tabAtiva === 'suor' && (
+          <ScrollView style={styles.placeholderContainer}>
+            <SweatHoursView perfil={userProfile || { valorHora: 21.88, salario: 3500 }} />
+          </ScrollView>
         )}
 
-        {tabAtiva === 'int2' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>💪 Horas de Suor (Integrante 2)</Text>
-            <Text style={styles.cardDesc}>Calculadora visual para converter preço de produtos em horas/dias de trabalho.</Text>
-          </View>
+        {tabAtiva === 'detox' && <SubscriptionsView />}
+
+        {tabAtiva === 'cooldown' && (
+          <ScrollView style={styles.placeholderContainer}>
+            <View style={styles.cardPlaceholder}>
+              <Text style={styles.cardTitle}>Cooldown 48h</Text>
+              <Text style={styles.cardDesc}>
+                Módulo de quarentena moral e avaliação reflexiva para retenção de compras por impulso.
+              </Text>
+            </View>
+          </ScrollView>
         )}
 
-        {tabAtiva === 'int3' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>🧹 Detox de Assinaturas (Integrante 3)</Text>
-            <Text style={styles.cardDesc}>Checklist interativo para rastrear e cancelar gastos recorrentes com total economizado.</Text>
-          </View>
+        {tabAtiva === 'potes' && (
+          <ScrollView style={styles.placeholderContainer}>
+            <Pots />
+          </ScrollView>
         )}
-
-        {tabAtiva === 'int4' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>⏱️ Cooldown 48h (Integrante 4)</Text>
-            <Text style={styles.cardDesc}>Lista de desejos com contagem regressiva de 48h para evitar compras impulsivas.</Text>
-          </View>
-        )}
-
-        {tabAtiva === 'int5' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>📊 Orçamento 3 Potes (Integrante 5)</Text>
-            <Text style={styles.cardDesc}>Três barras de progresso visuais (50% Necessidades, 30% Estilo de Vida, 20% Dívidas).</Text>
-          </View>
-        )}
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
-  header: { padding: 20, paddingTop: 40, backgroundColor: '#1e293b' },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#38bdf8' },
-  headerSubtitle: { fontSize: 14, color: '#94a3b8', marginTop: 4 },
-  navBar: { paddingHorizontal: 10, paddingVertical: 12, backgroundColor: '#1e293b', maxHeight: 60 },
+  header: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 16, backgroundColor: '#1e293b' },
+  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#38bdf8' },
+  headerSubtitle: { fontSize: 13, color: '#94a3b8', marginTop: 2 },
+  navBar: { paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#1e293b', maxHeight: 58 },
   navButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#334155', marginRight: 8 },
   navActive: { backgroundColor: '#0284c7' },
-  navText: { color: '#ffffff', fontWeight: '600' },
-  content: { padding: 16 },
-  card: { backgroundColor: '#1e293b', padding: 20, borderRadius: 12, marginBottom: 16 },
+  navText: { color: '#cbd5e1', fontWeight: '600', fontSize: 13 },
+  navTextActive: { color: '#ffffff', fontWeight: 'bold' },
+  mainContent: { flex: 1 },
+  placeholderContainer: { flex: 1, padding: 16 },
+  cardPlaceholder: { backgroundColor: '#1e293b', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#f8fafc', marginBottom: 8 },
-  cardDesc: { fontSize: 14, color: '#cbd5e1', lineHeight: 20 }
+  cardDesc: { fontSize: 14, color: '#94a3b8', lineHeight: 20 },
+  infoBox: { marginTop: 16, padding: 12, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderRadius: 10 },
+  infoText: { color: '#f8fafc', fontSize: 13 },
+  bold: { fontWeight: 'bold', color: '#38bdf8' }
 });

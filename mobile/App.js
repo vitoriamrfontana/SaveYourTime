@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import ProfileView from './src/views/ProfileView';
 import SubscriptionsView from './src/views/SubscriptionsView';
 import SweatHoursView from './src/views/SweatHoursView';
+import Pots from './src/views/Pots';
 
 export default function App() {
   const [tabAtiva, setTabAtiva] = useState('profile');
@@ -13,13 +14,11 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Header da Aplicação */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Save your Time</Text>
         <Text style={styles.headerSubtitle}>Gestão Financeira e Consumo Consciente</Text>
       </View>
 
-      {/* Menu de Navegação por Abas */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.navBar}>
         <TouchableOpacity
           style={[styles.navButton, tabAtiva === 'profile' && styles.navActive]}
@@ -67,7 +66,6 @@ export default function App() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Área Principal de Conteúdo */}
       <View style={styles.mainContent}>
         {tabAtiva === 'profile' && (
           <ProfileView onProfileUpdated={(updated) => setUserProfile(updated)} />
@@ -75,7 +73,7 @@ export default function App() {
 
         {tabAtiva === 'suor' && (
           <ScrollView style={styles.placeholderContainer}>
-             <SweatHoursView perfil={userProfile || { valorHora: 21.88, salario: 3500 }} />
+            <SweatHoursView perfil={userProfile || { valorHora: 21.88, salario: 3500 }} />
           </ScrollView>
         )}
 
@@ -94,12 +92,7 @@ export default function App() {
 
         {tabAtiva === 'potes' && (
           <ScrollView style={styles.placeholderContainer}>
-            <View style={styles.cardPlaceholder}>
-              <Text style={styles.cardTitle}>Orçamento 3 Potes (50-30-20)</Text>
-              <Text style={styles.cardDesc}>
-                Dashboard de acompanhamento e distribuição orçamentária entre Necessidades, Estilo de Vida e Dívidas.
-              </Text>
-            </View>
+            <Pots />
           </ScrollView>
         )}
       </View>

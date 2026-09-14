@@ -33,34 +33,18 @@ export const simularHorasSuor = async (item, preco, valorHoraActual) => {
     });
     if (res.ok) return await res.json();
   } catch (e) {}
-  
+
   const precoNum = parseFloat(preco);
   const vHora = valorHoraActual || 21.88;
   const salarioMensal = vHora * 160;
-  
+
   const horasSuor = parseFloat((precoNum / vHora).toFixed(1));
   const diasTrabalho = parseFloat((horasSuor / 8).toFixed(1));
   const percentualSalario = parseFloat(((precoNum / salarioMensal) * 100).toFixed(1));
-  
+
   return {
     simulacao: { item, preco: precoNum, horasSuor, diasTrabalho, percentualSalario },
     mensagem: `O item "${item}" (R$ ${precoNum.toFixed(2)}) custará ${horasSuor} horas (${diasTrabalho} dias úteis) do seu trabalho.`
-  };
-};
-
-export const fetchAssinaturas = async () => {
-  try {
-    const res = await fetch(`${API_BASE}/subscriptions`);
-    if (res.ok) return await res.json();
-  } catch (e) {}
-  return {
-    assinaturas: [
-      { id: 1, nome: 'Streaming de Filmes', valor: 55.90, categoria: 'Entretenimento', cancelado: true },
-      { id: 2, nome: 'Streaming de Música', valor: 21.90, categoria: 'Entretenimento', cancelado: false },
-      { id: 3, nome: 'Tarifa de Conta Corrente', valor: 34.50, categoria: 'Banco', cancelado: true },
-      { id: 4, nome: 'Seguro do Cartão não solicitado', valor: 19.90, categoria: 'Banco', cancelado: true }
-    ],
-    resumo: { totalItens: 4, cancelados: 3, economiaMensal: 110.30, economiaAnual: 1323.60 }
   };
 };
 
@@ -69,7 +53,7 @@ export const fetchPotes = async (salarioActual) => {
     const res = await fetch(`${API_BASE}/pots`);
     if (res.ok) return await res.json();
   } catch (e) {}
-  
+
   const salario = salarioActual || 3500;
   return {
     salario,
@@ -81,11 +65,50 @@ export const fetchPotes = async (salarioActual) => {
   };
 };
 
-
 export const ApiService = {
   getUserProfile: fetchPerfil,
   updateUserProfile: async (data) => {
     const res = await updatePerfil(data.salario, data.horasMensais);
     return { success: true, data: res, message: 'Perfil atualizado com sucesso.' };
+  },
+
+  // Listar assinaturas + economia acumulada
+  getSubscriptions: async () => {
+    const response = await fetch(`${API_BASE}/subscriptions`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao buscar assinaturas.');
+    }
+    return json.data; // { subscriptions, economia }
+  },
+
+  // Alternar status ativo/cancelado de uma assinatura
+  toggleSubscription: async (id) => {
+    const response = await fetch(`${API_BASE}/subscriptions/${id}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao atualizar assinatura.');
+    }
+    return json.data;
+  },
+
+  // Cadastrar nova assinatura
+  createSubscription: async (nome, valorMensal) => {
+    const response = await fetch(`${API_BASE}/subscriptions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nome, valorMensal })
+    });
+    const json = await response.json();
+    if (!response.ok || !json.success) {
+      throw new Error(json?.error?.message || 'Erro ao criar assinatura.');
+    }
+    return json.data;
   }
 };

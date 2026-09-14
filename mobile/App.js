@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import ProfileView from './src/views/ProfileView';
+import SubscriptionsView from './src/views/SubscriptionsView';
 import SweatHoursView from './src/views/SweatHoursView';
 
 export default function App() {
@@ -78,16 +79,7 @@ export default function App() {
           </ScrollView>
         )}
 
-        {tabAtiva === 'detox' && (
-          <ScrollView style={styles.placeholderContainer}>
-            <View style={styles.cardPlaceholder}>
-              <Text style={styles.cardTitle}>Detox de Assinaturas</Text>
-              <Text style={styles.cardDesc}>
-                Módulo de rastreamento, estimativa e gerenciamento de despesas recorrentes e mensalidades.
-              </Text>
-            </View>
-          </ScrollView>
-        )}
+        {tabAtiva === 'detox' && <SubscriptionsView />}
 
         {tabAtiva === 'cooldown' && (
           <ScrollView style={styles.placeholderContainer}>

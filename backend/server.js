@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
+const subscriptionsRoutes = require('./src/routes/subscriptionsRoutes');
+const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,13 +42,9 @@ app.post('/api/simulate', (req, res) => {
   });
 });
 
-// INTEGRANTE 3: Módulo Detox de Assinaturas
-app.get('/api/subscriptions', (req, res) => {
-  res.json([
-    { id: 1, nome: 'Streaming de Vídeo', valor: 39.90, cancelado: false },
-    { id: 2, nome: 'Pacote de Tarifas Banco', valor: 29.90, cancelado: true }
-  ]);
-});
+//   (Detox de Assinaturas): Rotas do Módulo de Assinaturas
+app.use('/api/subscriptions', subscriptionsRoutes);
+
 
 // INTEGRANTE 4: Módulo Trava Cooldown 48h
 app.get('/api/cooldown', (req, res) => {
@@ -68,6 +66,8 @@ app.get('/api/pots', (req, res) => {
   });
 });
 
+app.use(notFoundHandler);
+app.use(errorHandler);
 app.listen(PORT, () => {
   console.log(`🚀 Servidor Save your Time API rodando na porta ${PORT}`);
 });

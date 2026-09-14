@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
 const subscriptionsRoutes = require('./src/routes/subscriptionsRoutes');
@@ -10,7 +10,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Rota de Healthcheck
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -20,38 +19,44 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// INTEGRANTE 1 (Vitória): Rotas do Módulo Perfil do Usuário
 app.use('/api', userRoutes);
 
-
-// INTEGRANTE 2: Módulo Horas de Suor
 app.post('/api/simulate', (req, res) => {
-  const { precoItem } = req.body;
-  const preco = Number(precoItem) || 0;
+  const item = req.body.item || 'Item';
+  const preco = Number(req.body.preco ?? req.body.precoItem) || 0;
   const UserModel = require('./src/models/userModel');
   const perfil = UserModel.getProfile();
+  const vHora = perfil.valorHora || 21.88;
+  const salario = perfil.salario || 3500;
   
-  const horasSuor = Number((preco / perfil.valorHora).toFixed(1));
+  const horasSuor = Number((preco / vHora).toFixed(1));
   const diasTrabalho = Number((horasSuor / 8).toFixed(1));
+  const percentualSalario = Number(((preco / salario) * 100).toFixed(1));
+
+  const simulacao = {
+    item,
+    preco,
+    horasSuor,
+    diasTrabalho,
+    percentualSalario
+  };
 
   res.json({
+    simulacao,
     precoItem: preco,
     horasSuor,
     diasTrabalho,
-    mensagem: `Esse item custa ${horasSuor} horas (${diasTrabalho} dias) do seu trabalho. Vale a pena?`
+    percentualSalario,
+    mensagem: `O item "${item}" (R$ ${preco.toFixed(2)}) custará ${horasSuor} horas (${diasTrabalho} dias úteis) do seu trabalho.`
   });
 });
 
-//   (Detox de Assinaturas): Rotas do Módulo de Assinaturas
 app.use('/api/subscriptions', subscriptionsRoutes);
 
-
-// INTEGRANTE 4: Módulo Trava Cooldown 48h
 app.get('/api/cooldown', (req, res) => {
   res.json([]);
 });
 
-// INTEGRANTE 5: Módulo Orçamento 3 Potes (50-30-20)
 app.get('/api/pots', (req, res) => {
   const UserModel = require('./src/models/userModel');
   const perfil = UserModel.getProfile();
@@ -69,5 +74,5 @@ app.get('/api/pots', (req, res) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor Save your Time API rodando na porta ${PORT}`);
+  console.log(`Servidor Save your Time API rodando na porta ${PORT}`);
 });

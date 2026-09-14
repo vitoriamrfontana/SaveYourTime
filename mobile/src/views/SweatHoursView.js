@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { simularHorasSuor } from '../services/api';
 
 const QUICK_TAGS = [
-  { label: ' iPhone', item: 'iPhone 15', preco: '5000' },
-  { label: ' Tênis', item: 'Tênis de Marca', preco: '800' },
-  { label: ' Lanche', item: 'Combo Fast Food', preco: '45' },
-  { label: ' Console', item: 'Video Game', preco: '4000' }
+  { label: 'iPhone', item: 'iPhone 15', preco: '5000' },
+  { label: 'Tênis', item: 'Tênis de Marca', preco: '800' },
+  { label: 'Lanche', item: 'Combo Fast Food', preco: '45' },
+  { label: 'Console', item: 'Video Game', preco: '4000' }
 ];
 
 export default function SweatHoursView({ perfil }) {
@@ -20,7 +20,8 @@ export default function SweatHoursView({ perfil }) {
     setLoading(true);
     setResultado(null);
     try {
-      const res = await simularHorasSuor(item, preco, perfil.valorHora);
+      const vHora = Number(perfil?.valorHora) || 21.88;
+      const res = await simularHorasSuor(item, preco, vHora);
       setResultado(res);
     } catch (error) {
       console.error(error);
@@ -34,10 +35,12 @@ export default function SweatHoursView({ perfil }) {
     setPreco(tag.preco);
   };
 
+  const sim = resultado?.simulacao || resultado;
+
   return (
     <View style={styles.card}>
       <Text style={styles.badge}>INTEGRANTE 2 - HORAS DE SUOR (Arthur)</Text>
-      <Text style={styles.title}> Horas de Suor</Text>
+      <Text style={styles.title}>Horas de Suor</Text>
       <Text style={styles.subtitle}>Descubra quanto tempo da sua vida você vai trabalhar para pagar um item.</Text>
 
       <Text style={styles.sectionTitle}>Ideias Rápidas:</Text>
@@ -80,28 +83,28 @@ export default function SweatHoursView({ perfil }) {
         )}
       </TouchableOpacity>
 
-      {resultado && resultado.simulacao && (
+      {resultado && sim && sim.horasSuor !== undefined && (
         <View style={styles.resultBox}>
           <Text style={styles.resultTitle}>Impacto Real no seu Trabalho:</Text>
-          <Text style={styles.resultBig}>{resultado.simulacao.horasSuor} Horas</Text>
-          <Text style={styles.resultDays}>Equivalente a {resultado.simulacao.diasTrabalho} dias úteis de trabalho!</Text>
+          <Text style={styles.resultBig}>{sim.horasSuor} Horas</Text>
+          <Text style={styles.resultDays}>Equivalente a {sim.diasTrabalho} dias úteis de trabalho!</Text>
           
-          {resultado.simulacao.percentualSalario && (
+          {sim.percentualSalario !== undefined && (
             <View style={styles.percentualContainer}>
-              <Text style={styles.percentualText}>Isso consome {resultado.simulacao.percentualSalario}% do seu salário mensal.</Text>
+              <Text style={styles.percentualText}>Isso consome {sim.percentualSalario}% do seu salário mensal.</Text>
               <View style={styles.progressBarBg}>
                 <View style={[
                   styles.progressBarFill, 
-                  { width: `${Math.min(resultado.simulacao.percentualSalario, 100)}%` },
-                  resultado.simulacao.percentualSalario > 20 ? { backgroundColor: '#ef4444' } : 
-                  resultado.simulacao.percentualSalario > 5 ? { backgroundColor: '#eab308' } : { backgroundColor: '#22c55e' }
+                  { width: `${Math.min(Number(sim.percentualSalario) || 0, 100)}%` },
+                  sim.percentualSalario > 20 ? { backgroundColor: '#ef4444' } : 
+                  sim.percentualSalario > 5 ? { backgroundColor: '#eab308' } : { backgroundColor: '#22c55e' }
                 ]} />
               </View>
             </View>
           )}
 
           <View style={styles.provocacaoBox}>
-            <Text style={styles.provocacaoText}>{resultado.mensagem || `"Vale a pena trabalhar ${resultado.simulacao.diasTrabalho} dias por isso?"`}</Text>
+            <Text style={styles.provocacaoText}>{resultado.mensagem || `"Vale a pena trabalhar ${sim.diasTrabalho} dias por isso?"`}</Text>
           </View>
         </View>
       )}

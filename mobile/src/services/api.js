@@ -28,18 +28,31 @@ export const updatePerfil = async (salario, horasMensais, outrosDados = {}) => {
 };
 
 export const simularHorasSuor = async (item, preco, valorHoraActual) => {
+  const precoNum = parseFloat(preco) || 0;
+  const vHora = valorHoraActual || 21.88;
+  const salarioMensal = vHora * 160;
+
   try {
     const res = await fetch(`${API_BASE}/simulate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item, preco })
+      body: JSON.stringify({ item, preco: precoNum, precoItem: precoNum })
     });
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.simulacao) return data;
+      return {
+        simulacao: {
+          item: item || 'Item',
+          preco: precoNum,
+          horasSuor: data.horasSuor || parseFloat((precoNum / vHora).toFixed(1)),
+          diasTrabalho: data.diasTrabalho || parseFloat((precoNum / vHora / 8).toFixed(1)),
+          percentualSalario: data.percentualSalario || parseFloat(((precoNum / salarioMensal) * 100).toFixed(1))
+        },
+        mensagem: data.mensagem || `O item "${item}" (R$ ${precoNum.toFixed(2)}) custará ${data.horasSuor} horas do seu trabalho.`
+      };
+    }
   } catch (e) {}
-
-  const precoNum = parseFloat(preco);
-  const vHora = valorHoraActual || 21.88;
-  const salarioMensal = vHora * 160;
 
   const horasSuor = parseFloat((precoNum / vHora).toFixed(1));
   const diasTrabalho = parseFloat((horasSuor / 8).toFixed(1));

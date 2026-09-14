@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import ProfileView from './src/views/ProfileView';
@@ -13,13 +13,11 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Header da Aplicação */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Save your Time</Text>
         <Text style={styles.headerSubtitle}>Gestão Financeira e Consumo Consciente</Text>
       </View>
 
-      {/* Menu de Navegação por Abas */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.navBar}>
         <TouchableOpacity
           style={[styles.navButton, tabAtiva === 'profile' && styles.navActive]}
@@ -67,7 +65,6 @@ export default function App() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Área Principal de Conteúdo */}
       <View style={styles.mainContent}>
         {tabAtiva === 'profile' && (
           <ProfileView onProfileUpdated={(updated) => setUserProfile(updated)} />

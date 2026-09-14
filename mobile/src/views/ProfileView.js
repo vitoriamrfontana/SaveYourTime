@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -27,13 +27,19 @@ export default function ProfileView({ onProfileUpdated }) {
 
   const loadProfile = async () => {
     setLoading(true);
-    const data = await ApiService.getUserProfile();
-    if (data) {
-      setNome(data.nome || '');
-      setSalario(data.salario ? String(data.salario) : '');
-      setHorasMensais(data.horasMensais ? String(data.horasMensais) : '');
-      setMetaEconomia(data.metaEconomia ? String(data.metaEconomia) : '');
-      setValorHora(data.valorHora || 0);
+    try {
+      const res = await ApiService.getUserProfile();
+      const data = res?.data || res;
+      if (data) {
+        setNome(data.nome || '');
+        setSalario(data.salario ? String(data.salario) : '');
+        setHorasMensais(data.horasMensais ? String(data.horasMensais) : '');
+        setMetaEconomia(data.metaEconomia ? String(data.metaEconomia) : '');
+        const calculatedHora = Number(data.valorHora) || (data.salario && data.horasMensais ? Number((data.salario / data.horasMensais).toFixed(2)) : 0);
+        setValorHora(calculatedHora);
+      }
+    } catch (err) {
+      console.error('Erro ao carregar perfil:', err);
     }
     setLoading(false);
   };
@@ -58,20 +64,25 @@ export default function ProfileView({ onProfileUpdated }) {
       metaEconomia: Number(metaEconomia) || 0
     };
 
-    const res = await ApiService.updateUserProfile(updatedData);
+    try {
+      const res = await ApiService.updateUserProfile(updatedData);
+      setSaving(false);
 
-    setSaving(false);
+      const profileData = res?.data?.data || res?.data || res;
+      const calculatedHora = Number(profileData?.valorHora) || Number((updatedData.salario / updatedData.horasMensais).toFixed(2));
 
-    if (res.success && res.data) {
-      setValorHora(res.data.valorHora);
-      setFeedback({ type: 'success', text: res.message || 'Perfil atualizado com sucesso.' });
-      if (onProfileUpdated) onProfileUpdated(res.data);
-    } else {
+      setValorHora(calculatedHora);
+      setFeedback({ type: 'success', text: res?.message || 'Perfil atualizado com sucesso.' });
+      if (onProfileUpdated) {
+        onProfileUpdated({ ...profileData, valorHora: calculatedHora });
+      }
+    } catch (err) {
+      setSaving(false);
       setFeedback({ type: 'error', text: 'Erro ao salvar as alterações.' });
     }
   };
 
-  const valorDia = (valorHora * 8).toFixed(2);
+  const valorDia = ((Number(valorHora) || 0) * 8).toFixed(2);
 
   if (loading) {
     return (
@@ -89,16 +100,14 @@ export default function ProfileView({ onProfileUpdated }) {
         Defina seu salário e carga horária para calcular a métrica de tempo de trabalho.
       </Text>
 
-      {/* Card Destaque: Valor da Hora Calculado */}
       <View style={styles.highlightCard}>
         <Text style={styles.highlightBadge}>VALOR DA HORA DE TRABALHO</Text>
-        <Text style={styles.highlightValue}>R$ {valorHora.toFixed(2)}</Text>
+        <Text style={styles.highlightValue}>R$ {(Number(valorHora) || 0).toFixed(2)}</Text>
         <Text style={styles.highlightSubtext}>
           Equivale a aproximadamente <Text style={styles.boldText}>R$ {valorDia}</Text> por dia útil de trabalho (8h).
         </Text>
       </View>
 
-      {/* Formulário */}
       <View style={styles.formCard}>
         <Text style={styles.formTitle}>Dados Financeiros Base</Text>
 
@@ -141,14 +150,12 @@ export default function ProfileView({ onProfileUpdated }) {
           onChangeText={setMetaEconomia}
         />
 
-        {/* Feedback de Alerta */}
         {feedback && (
           <View style={[styles.feedbackBox, feedback.type === 'error' ? styles.feedbackError : styles.feedbackSuccess]}>
             <Text style={styles.feedbackText}>{feedback.text}</Text>
           </View>
         )}
 
-        {/* Botão de Salvar */}
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSave}

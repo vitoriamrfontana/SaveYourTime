@@ -1,27 +1,30 @@
-// Serviço de Conexão com o Backend com fallback para ambiente offline/demonstração
-const API_BASE = 'http://localhost:3000/api';
+﻿const API_BASE = 'http://localhost:3000/api';
 
 export const fetchPerfil = async () => {
   try {
     const res = await fetch(`${API_BASE}/user`);
-    if (res.ok) return await res.json();
-  } catch (e) {
-    // Fallback local
-  }
+    if (res.ok) {
+      const json = await res.json();
+      return json.data || json;
+    }
+  } catch (e) {}
   return { nome: 'Maria Silva', salario: 3500, horasMensais: 160, valorHora: 21.88 };
 };
 
-export const updatePerfil = async (salario, horasMensais) => {
+export const updatePerfil = async (salario, horasMensais, outrosDados = {}) => {
   try {
     const res = await fetch(`${API_BASE}/user`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ salario, horasMensais })
+      body: JSON.stringify({ salario, horasMensais, ...outrosDados })
     });
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const json = await res.json();
+      return json.data || json;
+    }
   } catch (e) {}
   const valorHora = parseFloat((salario / horasMensais).toFixed(2));
-  return { nome: 'Maria Silva', salario: Number(salario), horasMensais: Number(horasMensais), valorHora };
+  return { nome: outrosDados.nome || 'Maria Silva', salario: Number(salario), horasMensais: Number(horasMensais), valorHora };
 };
 
 export const simularHorasSuor = async (item, preco, valorHoraActual) => {
@@ -68,11 +71,13 @@ export const fetchPotes = async (salarioActual) => {
 export const ApiService = {
   getUserProfile: fetchPerfil,
   updateUserProfile: async (data) => {
-    const res = await updatePerfil(data.salario, data.horasMensais);
+    const res = await updatePerfil(data.salario, data.horasMensais, {
+      nome: data.nome,
+      metaEconomia: data.metaEconomia
+    });
     return { success: true, data: res, message: 'Perfil atualizado com sucesso.' };
   },
 
-  // Listar assinaturas + economia acumulada
   getSubscriptions: async () => {
     const response = await fetch(`${API_BASE}/subscriptions`, {
       method: 'GET',
@@ -82,10 +87,9 @@ export const ApiService = {
     if (!response.ok || !json.success) {
       throw new Error(json?.error?.message || 'Erro ao buscar assinaturas.');
     }
-    return json.data; // { subscriptions, economia }
+    return json.data;
   },
 
-  // Alternar status ativo/cancelado de uma assinatura
   toggleSubscription: async (id) => {
     const response = await fetch(`${API_BASE}/subscriptions/${id}/toggle`, {
       method: 'PATCH',
@@ -98,7 +102,6 @@ export const ApiService = {
     return json.data;
   },
 
-  // Cadastrar nova assinatura
   createSubscription: async (nome, valorMensal) => {
     const response = await fetch(`${API_BASE}/subscriptions`, {
       method: 'POST',

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import ProfileView from './src/views/ProfileView';
+import SweatHoursView from './src/views/SweatHoursView';
 
 export default function App() {
   const [tabAtiva, setTabAtiva] = useState('profile');
@@ -73,19 +74,7 @@ export default function App() {
 
         {tabAtiva === 'suor' && (
           <ScrollView style={styles.placeholderContainer}>
-            <View style={styles.cardPlaceholder}>
-              <Text style={styles.cardTitle}>Horas de Suor</Text>
-              <Text style={styles.cardDesc}>
-                Módulo de conversão do valor de produtos em tempo de trabalho necessário para aquisição.
-              </Text>
-              {userProfile && (
-                <View style={styles.infoBox}>
-                  <Text style={styles.infoText}>
-                    Valor por hora do perfil: <Text style={styles.bold}>R$ {userProfile.valorHora}</Text>
-                  </Text>
-                </View>
-              )}
-            </View>
+             <SweatHoursView perfil={userProfile || { valorHora: 21.88, salario: 3500 }} />
           </ScrollView>
         )}
 

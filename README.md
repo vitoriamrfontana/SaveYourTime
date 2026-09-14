@@ -165,11 +165,45 @@ Escaneie o QR Code exibido no terminal utilizando a câmera ou o app **Expo Go**
 
 ---
 
-## 🌿 8. Boas Práticas e Fluxo de Versionamento com Git
+## 🌿 8. Fluxo de Versionamento com Git e Pull Requests
 
-1. NUNCA faça commits diretamente na branch `main`.
-2. Para criar novas funcionalidades, abra uma branch própria seguindo o padrão:
-   `git checkout -b feature/integrante-X-nome-do-modulo`
-3. Ao finalizar a tarefa da sprint, envie a branch para o repositório remoto:
-   `git push origin feature/integrante-X-nome-do-modulo`
-4. Abra um **Pull Request** no GitHub para revisão da equipe antes de realizar o merge.
+### Estrutura de Branches
+
+| Branch | Finalidade |
+| :--- | :--- |
+| `main` | Versão final do projeto. **Recebe merge apenas no último dia de aula.** |
+| `develop` | Branch de integração contínua. Todo Pull Request da Sprint deve ser aprovado e mergeado aqui. |
+| `feature/nome-modulo` | Branch individual de cada integrante para desenvolver o seu módulo. |
+
+---
+
+### Regras Obrigatórias
+
+1. **NUNCA** faça commits diretamente nas branches `main` ou `develop`.
+2. Crie sempre uma branch própria para a sua funcionalidade:
+   ```bash
+   git checkout -b feature/nome-modulo
+   ```
+3. Ao finalizar a tarefa da Sprint, suba sua branch para o repositório remoto:
+   ```bash
+   git push origin feature/nome-modulo
+   ```
+4. Abra um **Pull Request** no GitHub com destino **obrigatório para `develop`** (nunca para `main`).
+5. O PR só pode ser mergeado após a **aprovação do revisor responsável**.
+
+---
+
+### 🔄 Ciclo de Revisão de Pull Requests (Sprint 1)
+
+Cada integrante é responsável por revisar o Pull Request de um colega específico, garantindo a revisão cruzada do código antes de qualquer merge na `develop`.
+
+| Integrante | Abre o PR do módulo | PR revisado por |
+| :--- | :--- | :--- |
+| **Vitória** | Perfil e Base do Projeto | **Arthur** |
+| **Arthur** | A definir pela equipe | **Murillo** |
+| **Murillo** | A definir pela equipe | **Tiago** |
+| **Tiago** | A definir pela equipe | **Afonso** |
+| **Afonso** | A definir pela equipe | **Vitória** |
+
+> **Como revisar:** Acesse o Pull Request do seu colega no GitHub, leia o código adicionado, execute o projeto localmente e aprove clicando em **"Approve"** (ou solicite correções com **"Request changes"**).
+

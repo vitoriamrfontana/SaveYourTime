@@ -1,7 +1,6 @@
 const UserModel = require('../models/userModel');
 
 const UserController = {
-  // GET /api/user - Retorna o perfil do usuário
   getProfile: (req, res) => {
     try {
       const profile = UserModel.getProfile();
@@ -18,12 +17,10 @@ const UserController = {
     }
   },
 
-  // PUT /api/user - Atualiza o perfil do usuário
   updateProfile: (req, res) => {
     try {
       const { nome, salario, horasMensais, metaEconomia } = req.body;
 
-      // Validações básicas
       if (salario !== undefined && Number(salario) <= 0) {
         return res.status(400).json({
           success: false,

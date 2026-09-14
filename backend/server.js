@@ -23,9 +23,6 @@ app.get('/api/health', (req, res) => {
 // INTEGRANTE 1 (Vitória): Rotas do Módulo Perfil do Usuário
 app.use('/api', userRoutes);
 
-// ====================================================================
-// ROTAS MOCK / PLACEHOLDERS (Aguardando implementação dos Integrantes 2 a 5)
-// ====================================================================
 
 // INTEGRANTE 2: Módulo Horas de Suor
 app.post('/api/simulate', (req, res) => {

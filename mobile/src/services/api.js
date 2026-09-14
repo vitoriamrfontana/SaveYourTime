@@ -24,7 +24,7 @@ async function request(path, options = {}) {
   }
 
   // Parte da API usa o envelope { success, data }, enquanto endpoints
-  // simples (como /pots e /cooldown) retornam o payload diretamente.
+  // simples (como /pots) retornam o payload diretamente.
   return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
     ? json.data
     : json;
@@ -132,6 +132,10 @@ export const ApiService = {
 
   getSubscriptions: async () => {
     return getAssinaturas();
+  },
+
+  getCooldownItems: async () => {
+    return getCooldown();
   },
 
   toggleSubscription: async (id) => {

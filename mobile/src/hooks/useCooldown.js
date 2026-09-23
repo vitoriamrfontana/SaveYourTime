@@ -25,8 +25,11 @@ export function useCooldown() {
     try {
       if (!silent) setError(null);
       const data = await ApiService.getCooldownItems();
-      setItems(data.items);
-      setResumo(data.resumo);
+
+      // Blinda contra payload fora do formato esperado (ex.: uma versão
+      // antiga da API ainda no ar, respondendo [] em vez de { items, resumo }).
+      setItems(Array.isArray(data?.items) ? data.items : []);
+      setResumo({ ...RESUMO_INICIAL, ...(data?.resumo ?? {}) });
     } catch (err) {
       setError(err.message);
     } finally {

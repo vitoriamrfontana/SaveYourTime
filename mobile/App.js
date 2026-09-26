@@ -6,10 +6,17 @@ import SubscriptionsView from './src/views/SubscriptionsView';
 import SweatHoursView from './src/views/SweatHoursView';
 import CooldownView from './src/views/CooldownView';
 import Pots from './src/views/Pots';
+import DealsView from './src/views/DealsView';
 
 export default function App() {
   const [tabAtiva, setTabAtiva] = useState('profile');
   const [userProfile, setUserProfile] = useState(null);
+  const [termoComparador, setTermoComparador] = useState('');
+
+  const navegarParaComparador = (termo = '') => {
+    setTermoComparador(termo);
+    setTabAtiva('deals');
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -65,6 +72,18 @@ export default function App() {
             3 Potes (50-30-20)
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.navButton, tabAtiva === 'deals' && styles.navActive]}
+          onPress={() => {
+            setTermoComparador('');
+            setTabAtiva('deals');
+          }}
+        >
+          <Text style={[styles.navText, tabAtiva === 'deals' && styles.navTextActive]}>
+            Comparador
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <View style={styles.mainContent}>
@@ -80,12 +99,19 @@ export default function App() {
 
         {tabAtiva === 'detox' && <SubscriptionsView />}
 
-        {tabAtiva === 'cooldown' && <CooldownView />}
+        {tabAtiva === 'cooldown' && <CooldownView onBuscarOferta={navegarParaComparador} />}
 
         {tabAtiva === 'potes' && (
           <ScrollView style={styles.placeholderContainer}>
             <Pots />
           </ScrollView>
+        )}
+
+        {tabAtiva === 'deals' && (
+          <DealsView
+            perfil={userProfile || { valorHora: 21.88, salario: 3500 }}
+            termoInicial={termoComparador}
+          />
         )}
       </View>
     </SafeAreaView>

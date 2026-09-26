@@ -1,4 +1,4 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+﻿const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.100.163:3000/api';
 
 if (!process.env.EXPO_PUBLIC_API_URL) {
   console.warn(
@@ -23,8 +23,6 @@ async function request(path, options = {}) {
     throw new Error(message);
   }
 
-  // Parte da API usa o envelope { success, data }, enquanto endpoints
-  // simples (como /pots) retornam o payload diretamente.
   return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
     ? json.data
     : json;
@@ -113,6 +111,24 @@ export const getAssinaturas = () => request('/subscriptions');
 export const getCooldown = () => request('/cooldown');
 export const getPotes = () => request('/pots');
 
+export const searchDeals = async (query = '', valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/search?q=${encodeURIComponent(query)}&valorHora=${valorHora}`);
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
+
+export const getFeaturedDeals = async (valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/featured?valorHora=${valorHora}`);
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
+
 export const ApiService = {
   getUserProfile: fetchPerfil,
 
@@ -149,5 +165,13 @@ export const ApiService = {
       method: 'POST',
       body: JSON.stringify({ nome, valorMensal }),
     });
+  },
+
+  searchDeals: async (query, valorHora) => {
+    return searchDeals(query, valorHora);
+  },
+
+  getFeaturedDeals: async (valorHora) => {
+    return getFeaturedDeals(valorHora);
   },
 };

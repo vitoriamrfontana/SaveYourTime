@@ -2,6 +2,7 @@
 const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
 const subscriptionsRoutes = require('./src/routes/subscriptionsRoutes');
+const dealsRoutes = require('./src/routes/dealsRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
 const app = express();
@@ -14,7 +15,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     app: 'Save your Time API',
-    version: '1.0.0 (Sprint 1)',
+    version: '2.0.0 (Sprint 2)',
     timestamp: new Date()
   });
 });
@@ -52,6 +53,7 @@ app.post('/api/simulate', (req, res) => {
 });
 
 app.use('/api/subscriptions', subscriptionsRoutes);
+app.use('/api/deals', dealsRoutes);
 
 app.get('/api/cooldown', (req, res) => {
   res.json([]);

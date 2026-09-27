@@ -1,31 +1,59 @@
-﻿const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.100.163:3000/api';
+function obterApiUrlPadrao() {
+  if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, '');
+  }
 
-if (!process.env.EXPO_PUBLIC_API_URL) {
-  console.warn(
-    '[api.js] EXPO_PUBLIC_API_URL não definida. Usando http://localhost:3000/api como fallback.'
-  );
+  // No navegador, usa o mesmo host em que o Expo foi aberto.
+  // Isso evita depender de um IP LAN que pode mudar.
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const protocolo = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocolo}//${window.location.hostname}:3000/api`;
+  }
+
+  // Android Emulator (AVD) enxerga o host da máquina em 10.0.2.2.
+  return 'http://10.0.2.2:3000/api';
+}
+
+const API_URL = obterApiUrlPadrao();
+
+if (!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL)) {
+  console.warn(`[api.js] EXPO_PUBLIC_API_URL não definida. Usando ${API_URL}.`);
 }
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const json = await res.json().catch(() => ({}));
+  try {
+    const { signal: customSignal, ...fetchOptions } = options;
+    const res = await fetch(`${API_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...fetchOptions,
+      signal: customSignal || controller.signal,
+    });
 
-  if (!res.ok) {
-    const message =
-      json?.error?.message ||
-      json?.message ||
-      json?.erro ||
-      `Erro ${res.status} ao acessar ${path}`;
-    throw new Error(message);
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const message =
+        json?.error?.message ||
+        json?.message ||
+        json?.erro ||
+        `Erro ${res.status} ao acessar ${path}`;
+      throw new Error(message);
+    }
+
+    return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
+      ? json.data
+      : json;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Tempo limite ao acessar a API (${API_URL}${path}). Verifique se o backend está rodando.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
-    ? json.data
-    : json;
 }
 
 export const getHealth = () => request('/health');
@@ -151,7 +179,26 @@ export const fetchPotes = async (salarioActual) => {
 
 export const getAssinaturas = () => request('/subscriptions');
 export const getCooldown = () => request('/cooldown');
-export const getPotes = () => request('/pots');
+export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
+
+export const getLancamentosPotes = (mes, categoria) => {
+  const params = [];
+  if (mes) params.push(`mes=${encodeURIComponent(mes)}`);
+  if (categoria) params.push(`categoria=${encodeURIComponent(categoria)}`);
+  const query = params.join('&');
+  return request(`/pots/lancamentos${query ? `?${query}` : ''}`);
+};
+
+export const criarLancamentoPote = (lancamento) =>
+  request('/pots/lancamento', {
+    method: 'POST',
+    body: JSON.stringify(lancamento),
+  });
+
+export const deletarLancamentoPote = (id) =>
+  request(`/pots/lancamento/${id}`, {
+    method: 'DELETE',
+  });
 
 export const searchDeals = async (query = '', valorHora = 21.88) => {
   try {
@@ -229,4 +276,8 @@ export const ApiService = {
   getHealthScore: async () => {
     return getHealthScore();
   },
+  getPots: async (mes) => getPotes(mes),
+  getPotTransactions: async (mes, categoria) => getLancamentosPotes(mes, categoria),
+  createPotTransaction: async (lancamento) => criarLancamentoPote(lancamento),
+  deletePotTransaction: async (id) => deletarLancamentoPote(id),
 };

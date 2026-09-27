@@ -46,31 +46,16 @@ export const updatePerfil = (salario, horasMensais, nome, metaEconomia) =>
     body: JSON.stringify({ nome, salario, horasMensais, metaEconomia }),
   });
 
-export const simularHorasSuor = async (item, preco, valorHoraActual) => {
+export const simularHorasSuor = async (item, preco, categoria = 'Outros', valorHoraActual) => {
   const precoNum = Number(preco);
   const vHora = Number(valorHoraActual) || 21.88;
 
   try {
     const data = await request('/simulate', {
       method: 'POST',
-      body: JSON.stringify({ precoItem: precoNum }),
+      body: JSON.stringify({ item, preco: precoNum, categoria }),
     });
-
-    const horasSuor = Number(data.horasSuor ?? (precoNum / vHora).toFixed(1));
-    const diasTrabalho = Number(data.diasTrabalho ?? (horasSuor / 8).toFixed(1));
-    const salarioMensal = vHora * 160;
-    const percentualSalario = Number(((precoNum / salarioMensal) * 100).toFixed(1));
-
-    return {
-      ...data,
-      simulacao: {
-        item,
-        preco: precoNum,
-        horasSuor,
-        diasTrabalho,
-        percentualSalario,
-      },
-    };
+    return data;
   } catch (error) {
     const horasSuor = Number((precoNum / vHora).toFixed(1));
     const diasTrabalho = Number((horasSuor / 8).toFixed(1));
@@ -79,13 +64,70 @@ export const simularHorasSuor = async (item, preco, valorHoraActual) => {
 
     return {
       simulacao: {
+        id: 'sim-' + Date.now(),
         item,
         preco: precoNum,
+        categoria,
         horasSuor,
         diasTrabalho,
         percentualSalario,
+        nivelImpacto: percentualSalario > 20 ? 'Critico' : percentualSalario > 5 ? 'Moderado' : 'Baixo',
+        data: new Date().toISOString()
       },
-      mensagem: `O item "${item}" (R$ ${precoNum.toFixed(2)}) custará ${horasSuor} horas (${diasTrabalho} dias úteis) do seu trabalho.`,
+      precoItem: precoNum,
+      horasSuor,
+      diasTrabalho,
+      percentualSalario,
+      mensagem: `O item "${item}" (R$ ${precoNum.toFixed(2)}) custara ${horasSuor} horas (${diasTrabalho} dias uteis) do seu trabalho.`
+    };
+  }
+};
+
+export const getSimulationHistory = async () => {
+  try {
+    const res = await request('/simulate/history');
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
+
+export const deleteSimulation = async (id) => {
+  try {
+    return await request(`/simulate/history/${id}`, { method: 'DELETE' });
+  } catch (error) {
+    return { success: false };
+  }
+};
+
+export const updateSimulationStatus = async (id, status) => {
+  try {
+    return await request(`/simulate/history/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+  } catch (error) {
+    return { success: false };
+  }
+};
+
+export const getHealthScore = async () => {
+  try {
+    const res = await request('/simulate/health-score');
+    return res?.data || res;
+  } catch (error) {
+    return {
+      score: 72,
+      classificacao: 'Bom',
+      totalSimulacoes: 0,
+      totalSimuladoReais: 0,
+      totalHorasSimuladas: 0,
+      horasPoupadas: 0,
+      dinheiroPoupado: 0,
+      dicas: [
+        'Colocar gastos acima de 15h de trabalho no Cooldown preserva seu saldo.',
+        'Mantenha gastos superfluos dentro do teto de 30% da regra 50-30-20.'
+      ]
     };
   }
 };
@@ -169,9 +211,22 @@ export const ApiService = {
 
   searchDeals: async (query, valorHora) => {
     return searchDeals(query, valorHora);
-  },
-
-  getFeaturedDeals: async (valorHora) => {
+  },  getFeaturedDeals: async (valorHora) => {
     return getFeaturedDeals(valorHora);
+  },
+  simularHorasSuor: async (item, preco, categoria, valorHora) => {
+    return simularHorasSuor(item, preco, categoria, valorHora);
+  },
+  getSimulationHistory: async () => {
+    return getSimulationHistory();
+  },
+  deleteSimulation: async (id) => {
+    return deleteSimulation(id);
+  },
+  updateSimulationStatus: async (id, status) => {
+    return updateSimulationStatus(id, status);
+  },
+  getHealthScore: async () => {
+    return getHealthScore();
   },
 };

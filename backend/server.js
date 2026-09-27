@@ -2,6 +2,7 @@
 const cors = require('cors');
 const userRoutes = require('./src/routes/userRoutes');
 const subscriptionsRoutes = require('./src/routes/subscriptionsRoutes');
+const simulationRoutes = require('./src/routes/simulationRoutes');
 const dealsRoutes = require('./src/routes/dealsRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
@@ -22,38 +23,9 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api', userRoutes);
 
-app.post('/api/simulate', (req, res) => {
-  const item = req.body.item || 'Item';
-  const preco = Number(req.body.preco ?? req.body.precoItem) || 0;
-  const UserModel = require('./src/models/userModel');
-  const perfil = UserModel.getProfile();
-  const vHora = perfil.valorHora || 21.88;
-  const salario = perfil.salario || 3500;
-  
-  const horasSuor = Number((preco / vHora).toFixed(1));
-  const diasTrabalho = Number((horasSuor / 8).toFixed(1));
-  const percentualSalario = Number(((preco / salario) * 100).toFixed(1));
-
-  const simulacao = {
-    item,
-    preco,
-    horasSuor,
-    diasTrabalho,
-    percentualSalario
-  };
-
-  res.json({
-    simulacao,
-    precoItem: preco,
-    horasSuor,
-    diasTrabalho,
-    percentualSalario,
-    mensagem: `O item "${item}" (R$ ${preco.toFixed(2)}) custará ${horasSuor} horas (${diasTrabalho} dias úteis) do seu trabalho.`
-  });
-});
-
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/deals', dealsRoutes);
+app.use('/api/simulate', simulationRoutes);
 
 app.get('/api/cooldown', (req, res) => {
   res.json([]);

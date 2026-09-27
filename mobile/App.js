@@ -93,7 +93,11 @@ export default function App() {
 
         {tabAtiva === 'suor' && (
           <ScrollView style={styles.placeholderContainer}>
-            <SweatHoursView perfil={userProfile || { valorHora: 21.88, salario: 3500 }} />
+            <SweatHoursView
+              perfil={userProfile || { valorHora: 21.88, salario: 3500 }}
+              onBuscarOferta={navegarParaComparador}
+              onMandarCooldown={() => setTabAtiva('cooldown')}
+            />
           </ScrollView>
         )}
 

@@ -135,8 +135,15 @@ Cada integrante é responsável pelo desenvolvimento da sua respectiva funcional
 - **`PATCH /api/cooldown/:id/quiz`**: Salva as respostas das perguntas reflexivas diárias.
 
 ### 5.5. Módulo Orçamento dos 3 Potes
-- **`GET /api/pots`**: Retorna o limite de cada pote com base no salário e o gasto atual com sinalização de estouro.
-- **`POST /api/pots/lancamento`**: Adiciona uma nova despesa associada a uma categoria (sobrevivencia, estiloVida, dividas).
+- **`GET /api/pots`**: Retorna os limites 50/30/20, gastos do mês, saldo, percentual consumido, burn rate diário, projeção de esgotamento e status de alerta de cada pote.
+  - *Query opcional:* `?mes=AAAA-MM` para consultar outro mês.
+- **`GET /api/pots/lancamentos`**: Retorna o extrato de despesas do mês.
+  - *Queries opcionais:* `?mes=AAAA-MM&categoria=sobrevivencia|estiloVida|dividas`
+- **`POST /api/pots/lancamento`**: Adiciona uma despesa associada a uma categoria.
+  - *Payload:* `{ "categoria": "sobrevivencia", "valor": 120.50, "descricao": "Mercado", "data": "2026-09-27" }`
+- **`DELETE /api/pots/lancamento/:id`**: Exclui um lançamento pelo identificador.
+
+> O módulo de 3 Potes segue o padrão atual do MVP: os lançamentos ficam em memória no `potsModel.js`, sem banco de dados ou ORM.
 
 ---
 

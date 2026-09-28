@@ -16,7 +16,8 @@ const {
 } = require("../middlewares/validateSubscription");
 
 router.get("/", subscriptionsController.listSubscriptions);
+router.get("/insights", subscriptionsController.getInsights);
+router.get("/auditoria", subscriptionsController.getAuditoria);
 router.post("/", validateCreateSubscription, subscriptionsController.createSubscription);
 router.patch("/:id/toggle", validateIdParam, subscriptionsController.toggleSubscription);
-
 module.exports = router;

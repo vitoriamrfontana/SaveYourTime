@@ -1,11 +1,3 @@
-/**
- * VIEW - Detox de Assinaturas
-- Detox de Assinaturas
- *
- * Renderizada dentro da área mainContent do App.js (que já tem seu
- * próprio header/navbar), então esta view não duplica cabeçalho nem
- * SafeAreaView — só o conteúdo da aba.
- */
 
 import React from 'react';
 import {
@@ -16,14 +8,32 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { useSubscriptions } from '../hooks/useSubscriptions';
+import { useSubscriptions, TODAS_CATEGORIAS } from '../hooks/useSubscriptions';
 import SubscriptionCard from '../components/SubscriptionCard';
 import EconomySummaryCard from '../components/EconomySummaryCard';
+import HoursImpactCard from '../components/HoursImpactCard';
+import CompoundGrowthPanel from '../components/CompoundGrowthPanel';
+import SubscriptionFilters from '../components/SubscriptionFilters';
+import AuditHistory from '../components/AuditHistory';
 import { colors } from '../theme/colors';
 
 export default function SubscriptionsView() {
-  const { subscriptions, economia, loading, refreshing, error, refresh, toggle } =
-    useSubscriptions();
+  const {
+    subscriptionsVisiveis,
+    economia,
+    insights,
+    auditoria,
+    categorias,
+    categoriaFiltro,
+    setCategoriaFiltro,
+    ordenacao,
+    setOrdenacao,
+    loading,
+    refreshing,
+    error,
+    refresh,
+    toggle,
+  } = useSubscriptions();
 
   if (loading) {
     return (
@@ -33,29 +43,68 @@ export default function SubscriptionsView() {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <Text style={styles.subtitulo}>
-        Desative o que você não usa mais e veja o impacto no seu orçamento.
-      </Text>
+  // Custo invisível de 5 anos de cada assinatura ativa, indexado pelo id
+  const custoEm5AnosPorId = {};
+  (insights?.custoInvisivel?.itens ?? []).forEach((item) => {
+    const projecao = item.projecoes.find((p) => p.meses === 60);
+    if (projecao) custoEm5AnosPorId[item.id] = projecao.valor;
+  });
+
+  const cabecalho = (
+    <View>
+      {error && <Text style={styles.erro}>{error}</Text>}
+
+      <HoursImpactCard horasTrabalho={insights?.horasTrabalho} />
 
       <EconomySummaryCard
         economiaMensal={economia.economiaMensal}
         economiaAnual={economia.economiaAnual}
       />
 
-      {error && <Text style={styles.erro}>{error}</Text>}
+      <CompoundGrowthPanel
+        projecaoJuros={insights?.projecaoJuros}
+        custoInvisivel={insights?.custoInvisivel}
+      />
 
+      <Text style={styles.secao}>Suas assinaturas</Text>
+      <Text style={styles.subtitulo}>
+        Desative o que você não usa mais e veja o impacto no seu orçamento.
+      </Text>
+
+      <SubscriptionFilters
+        categorias={categorias}
+        categoriaFiltro={categoriaFiltro}
+        onChangeCategoria={setCategoriaFiltro}
+        ordenacao={ordenacao}
+        onChangeOrdenacao={setOrdenacao}
+      />
+    </View>
+  );
+
+  return (
+    <View style={styles.container}>
       <FlatList
-        data={subscriptions}
+        data={subscriptionsVisiveis}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <SubscriptionCard subscription={item} onToggle={toggle} />}
+        renderItem={({ item }) => (
+          <SubscriptionCard
+            subscription={item}
+            onToggle={toggle}
+            custoEm5Anos={custoEm5AnosPorId[item.id]}
+          />
+        )}
+        ListHeaderComponent={cabecalho}
+        ListFooterComponent={<AuditHistory auditoria={auditoria} />}
+        ListEmptyComponent={
+          <Text style={styles.vazio}>
+            {categoriaFiltro === TODAS_CATEGORIAS
+              ? 'Nenhuma assinatura cadastrada ainda.'
+              : 'Nenhuma assinatura nesta categoria. Escolha outra categoria acima.'}
+          </Text>
+        }
         contentContainerStyle={{ paddingBottom: 24 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
-        }
-        ListEmptyComponent={
-          <Text style={styles.vazio}>Nenhuma assinatura cadastrada ainda.</Text>
         }
       />
     </View>
@@ -73,10 +122,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
   },
+  secao: {
+    color: colors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
   subtitulo: {
     fontSize: 13,
     color: colors.textSecondary,
-    marginBottom: 16,
+    marginTop: 2,
+    marginBottom: 12,
   },
   erro: {
     color: colors.danger,
@@ -86,6 +141,7 @@ const styles = StyleSheet.create({
   vazio: {
     color: colors.textSecondary,
     textAlign: 'center',
-    marginTop: 40,
+    marginTop: 24,
+    marginBottom: 12,
   },
 });

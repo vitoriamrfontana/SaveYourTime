@@ -1,33 +1,59 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+function obterApiUrlPadrao() {
+  if (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, '');
+  }
 
-if (!process.env.EXPO_PUBLIC_API_URL) {
-  console.warn(
-    '[api.js] EXPO_PUBLIC_API_URL não definida. Usando http://localhost:3000/api como fallback.'
-  );
+  // No navegador, usa o mesmo host em que o Expo foi aberto.
+  // Isso evita depender de um IP LAN que pode mudar.
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    const protocolo = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocolo}//${window.location.hostname}:3000/api`;
+  }
+
+  // Android Emulator (AVD) enxerga o host da máquina em 10.0.2.2.
+  return 'http://10.0.2.2:3000/api';
+}
+
+const API_URL = obterApiUrlPadrao();
+
+if (!(typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_API_URL)) {
+  console.warn(`[api.js] EXPO_PUBLIC_API_URL não definida. Usando ${API_URL}.`);
 }
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  const json = await res.json().catch(() => ({}));
+  try {
+    const { signal: customSignal, ...fetchOptions } = options;
+    const res = await fetch(`${API_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...fetchOptions,
+      signal: customSignal || controller.signal,
+    });
 
-  if (!res.ok) {
-    const message =
-      json?.error?.message ||
-      json?.message ||
-      json?.erro ||
-      `Erro ${res.status} ao acessar ${path}`;
-    throw new Error(message);
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const message =
+        json?.error?.message ||
+        json?.message ||
+        json?.erro ||
+        `Erro ${res.status} ao acessar ${path}`;
+      throw new Error(message);
+    }
+
+    return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
+      ? json.data
+      : json;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`Tempo limite ao acessar a API (${API_URL}${path}). Verifique se o backend está rodando.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  // Parte da API usa o envelope { success, data }, enquanto endpoints
-  // simples (como /pots e /cooldown) retornam o payload diretamente.
-  return json?.success && Object.prototype.hasOwnProperty.call(json, 'data')
-    ? json.data
-    : json;
 }
 
 export const getHealth = () => request('/health');
@@ -48,31 +74,16 @@ export const updatePerfil = (salario, horasMensais, nome, metaEconomia) =>
     body: JSON.stringify({ nome, salario, horasMensais, metaEconomia }),
   });
 
-export const simularHorasSuor = async (item, preco, valorHoraActual) => {
+export const simularHorasSuor = async (item, preco, categoria = 'Outros', valorHoraActual) => {
   const precoNum = Number(preco);
   const vHora = Number(valorHoraActual) || 21.88;
 
   try {
     const data = await request('/simulate', {
       method: 'POST',
-      body: JSON.stringify({ precoItem: precoNum }),
+      body: JSON.stringify({ item, preco: precoNum, categoria }),
     });
-
-    const horasSuor = Number(data.horasSuor ?? (precoNum / vHora).toFixed(1));
-    const diasTrabalho = Number(data.diasTrabalho ?? (horasSuor / 8).toFixed(1));
-    const salarioMensal = vHora * 160;
-    const percentualSalario = Number(((precoNum / salarioMensal) * 100).toFixed(1));
-
-    return {
-      ...data,
-      simulacao: {
-        item,
-        preco: precoNum,
-        horasSuor,
-        diasTrabalho,
-        percentualSalario,
-      },
-    };
+    return data;
   } catch (error) {
     const horasSuor = Number((precoNum / vHora).toFixed(1));
     const diasTrabalho = Number((horasSuor / 8).toFixed(1));
@@ -81,13 +92,70 @@ export const simularHorasSuor = async (item, preco, valorHoraActual) => {
 
     return {
       simulacao: {
+        id: 'sim-' + Date.now(),
         item,
         preco: precoNum,
+        categoria,
         horasSuor,
         diasTrabalho,
         percentualSalario,
+        nivelImpacto: percentualSalario > 20 ? 'Critico' : percentualSalario > 5 ? 'Moderado' : 'Baixo',
+        data: new Date().toISOString()
       },
-      mensagem: `O item "${item}" (R$ ${precoNum.toFixed(2)}) custará ${horasSuor} horas (${diasTrabalho} dias úteis) do seu trabalho.`,
+      precoItem: precoNum,
+      horasSuor,
+      diasTrabalho,
+      percentualSalario,
+      mensagem: `O item "${item}" (R$ ${precoNum.toFixed(2)}) custara ${horasSuor} horas (${diasTrabalho} dias uteis) do seu trabalho.`
+    };
+  }
+};
+
+export const getSimulationHistory = async () => {
+  try {
+    const res = await request('/simulate/history');
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
+
+export const deleteSimulation = async (id) => {
+  try {
+    return await request(`/simulate/history/${id}`, { method: 'DELETE' });
+  } catch (error) {
+    return { success: false };
+  }
+};
+
+export const updateSimulationStatus = async (id, status) => {
+  try {
+    return await request(`/simulate/history/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+  } catch (error) {
+    return { success: false };
+  }
+};
+
+export const getHealthScore = async () => {
+  try {
+    const res = await request('/simulate/health-score');
+    return res?.data || res;
+  } catch (error) {
+    return {
+      score: 72,
+      classificacao: 'Bom',
+      totalSimulacoes: 0,
+      totalSimuladoReais: 0,
+      totalHorasSimuladas: 0,
+      horasPoupadas: 0,
+      dinheiroPoupado: 0,
+      dicas: [
+        'Colocar gastos acima de 15h de trabalho no Cooldown preserva seu saldo.',
+        'Mantenha gastos superfluos dentro do teto de 30% da regra 50-30-20.'
+      ]
     };
   }
 };
@@ -111,7 +179,65 @@ export const fetchPotes = async (salarioActual) => {
 
 export const getAssinaturas = () => request('/subscriptions');
 export const getCooldown = () => request('/cooldown');
-export const getPotes = () => request('/pots');
+
+export const criarDesejoCooldown = (desejo) =>
+  request('/cooldown', {
+    method: 'POST',
+    body: JSON.stringify(desejo),
+  });
+
+export const responderQuizCooldown = (id, respostas) =>
+  request(`/cooldown/${id}/quiz`, {
+    method: 'PATCH',
+    body: JSON.stringify(respostas),
+  });
+
+// Auditoria de desfecho: encerra a quarentena das 48h
+export const desistirDesejoCooldown = (id) =>
+  request(`/cooldown/${id}/desisti`, { method: 'PATCH' });
+
+export const comprarDesejoCooldown = (id) =>
+  request(`/cooldown/${id}/comprei`, { method: 'PATCH' });
+
+export const getAuditoriaCooldown = () => request('/cooldown/auditoria');
+export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
+
+export const getLancamentosPotes = (mes, categoria) => {
+  const params = [];
+  if (mes) params.push(`mes=${encodeURIComponent(mes)}`);
+  if (categoria) params.push(`categoria=${encodeURIComponent(categoria)}`);
+  const query = params.join('&');
+  return request(`/pots/lancamentos${query ? `?${query}` : ''}`);
+};
+
+export const criarLancamentoPote = (lancamento) =>
+  request('/pots/lancamento', {
+    method: 'POST',
+    body: JSON.stringify(lancamento),
+  });
+
+export const deletarLancamentoPote = (id) =>
+  request(`/pots/lancamento/${id}`, {
+    method: 'DELETE',
+  });
+
+export const searchDeals = async (query = '', valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/search?q=${encodeURIComponent(query)}&valorHora=${valorHora}`);
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
+
+export const getFeaturedDeals = async (valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/featured?valorHora=${valorHora}`);
+    return Array.isArray(res) ? res : (res?.data || []);
+  } catch (error) {
+    return [];
+  }
+};
 
 export const ApiService = {
   getUserProfile: fetchPerfil,
@@ -134,16 +260,73 @@ export const ApiService = {
     return getAssinaturas();
   },
 
+  getCooldownItems: async () => {
+    return getCooldown();
+  },
+
+  createCooldownItem: async (desejo) => {
+    return criarDesejoCooldown(desejo);
+  },
+
+  answerCooldownQuiz: async (id, respostas) => {
+    return responderQuizCooldown(id, respostas);
+  },
+
+  giveUpCooldownItem: async (id) => {
+    return desistirDesejoCooldown(id);
+  },
+
+  buyCooldownItem: async (id) => {
+    return comprarDesejoCooldown(id);
+  },
+
+  getCooldownAudit: async () => {
+    return getAuditoriaCooldown();
+  },
+
   toggleSubscription: async (id) => {
     return request(`/subscriptions/${id}/toggle`, {
       method: 'PATCH',
     });
   },
 
-  createSubscription: async (nome, valorMensal) => {
+    createSubscription: async (nome, valorMensal, categoria) => {
     return request('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ nome, valorMensal }),
+      body: JSON.stringify({ nome, valorMensal, categoria }),
     });
   },
+
+  getSubscriptionInsights: async () => {
+    return request('/subscriptions/insights');
+  },
+
+  getSubscriptionAudit: async () => {
+    return request('/subscriptions/auditoria');
+  },
+
+  searchDeals: async (query, valorHora) => {
+    return searchDeals(query, valorHora);
+  },  getFeaturedDeals: async (valorHora) => {
+    return getFeaturedDeals(valorHora);
+  },
+  simularHorasSuor: async (item, preco, categoria, valorHora) => {
+    return simularHorasSuor(item, preco, categoria, valorHora);
+  },
+  getSimulationHistory: async () => {
+    return getSimulationHistory();
+  },
+  deleteSimulation: async (id) => {
+    return deleteSimulation(id);
+  },
+  updateSimulationStatus: async (id, status) => {
+    return updateSimulationStatus(id, status);
+  },
+  getHealthScore: async () => {
+    return getHealthScore();
+  },
+  getPots: async (mes) => getPotes(mes),
+  getPotTransactions: async (mes, categoria) => getLancamentosPotes(mes, categoria),
+  createPotTransaction: async (lancamento) => criarLancamentoPote(lancamento),
+  deletePotTransaction: async (id) => deletarLancamentoPote(id),
 };

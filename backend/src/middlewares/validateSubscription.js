@@ -1,12 +1,19 @@
 const ApiError = require("../utils/ApiError");
+const { CATEGORIAS } = require("../models/subscriptionsModel");
 
 /**
  * validateCreateSubscription - valida o payload de POST /api/subscriptions
  * ANTES de chegar no controller. Mantém o controller limpo, focado só
  * em orquestrar a chamada ao model.
  */
-function validateCreateSubscription(req, res, next) {
-  const { nome, valorMensal } = req.body;
+  function validateCreateSubscription(req, res, next) {
+    const { nome, valorMensal } = req.body;
+  
+    if (req.body.categoria !== undefined && !CATEGORIAS.includes(req.body.categoria)) {
+    return next(
+      ApiError.badRequest(`O campo 'categoria' deve ser um destes: ${CATEGORIAS.join(", ")}.`)
+    );
+  }
 
   if (!nome || typeof nome !== "string" || nome.trim().length === 0) {
     return next(ApiError.badRequest("O campo 'nome' é obrigatório e deve ser um texto."));

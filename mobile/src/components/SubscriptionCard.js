@@ -1,19 +1,24 @@
 import React from 'react';
 import { View, Text, Switch, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
+import { labelCategoria } from './SubscriptionFilters';
 
 function formatarMoeda(valor) {
   return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-export default function SubscriptionCard({ subscription, onToggle }) {
-  const { id, nome, valorMensal, ativo } = subscription;
+export default function SubscriptionCard({ subscription, onToggle, custoEm5Anos }) {
+  const { id, nome, valorMensal, ativo, categoria } = subscription;
 
   return (
     <View style={styles.card}>
       <View style={styles.info}>
         <Text style={[styles.nome, !ativo && styles.nomeCancelado]}>{nome}</Text>
+        <Text style={styles.categoria}>{labelCategoria(categoria)}</Text>
         <Text style={styles.valor}>{formatarMoeda(valorMensal)}/mês</Text>
+        {ativo && custoEm5Anos != null && (
+          <Text style={styles.custoInvisivel}>{formatarMoeda(custoEm5Anos)} em 5 anos</Text>
+        )}
       </View>
       <Switch
         value={ativo}
@@ -50,9 +55,19 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textDecorationLine: 'line-through',
   },
+  categoria: {
+    color: colors.accent,
+    fontSize: 12,
+    marginTop: 2,
+  },
   valor: {
     color: colors.textSecondary,
     fontSize: 13,
+    marginTop: 2,
+  },
+  custoInvisivel: {
+    color: colors.danger,
+    fontSize: 12,
     marginTop: 2,
   },
 });

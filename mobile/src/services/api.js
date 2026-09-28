@@ -202,11 +202,19 @@ export const ApiService = {
     });
   },
 
-  createSubscription: async (nome, valorMensal) => {
+    createSubscription: async (nome, valorMensal, categoria) => {
     return request('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ nome, valorMensal }),
+      body: JSON.stringify({ nome, valorMensal, categoria }),
     });
+  },
+
+  getSubscriptionInsights: async () => {
+    return request('/subscriptions/insights');
+  },
+
+  getSubscriptionAudit: async () => {
+    return request('/subscriptions/auditoria');
   },
 
   searchDeals: async (query, valorHora) => {

@@ -4,6 +4,7 @@ const userRoutes = require('./src/routes/userRoutes');
 const subscriptionsRoutes = require('./src/routes/subscriptionsRoutes');
 const simulationRoutes = require('./src/routes/simulationRoutes');
 const dealsRoutes = require('./src/routes/dealsRoutes');
+const cooldownRoutes = require('./src/routes/cooldownRoutes');
 const potsRoutes = require('./src/routes/potsRoutes');
 const { errorHandler, notFoundHandler } = require('./src/middlewares/errorHandler');
 
@@ -28,10 +29,7 @@ app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/deals', dealsRoutes);
 app.use('/api/simulate', simulationRoutes);
 
-app.get('/api/cooldown', (req, res) => {
-  res.json([]);
-});
-
+app.use('/api/cooldown', cooldownRoutes);
 app.use('/api/pots', potsRoutes);
 
 app.use(notFoundHandler);

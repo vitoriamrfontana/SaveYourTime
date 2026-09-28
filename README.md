@@ -130,9 +130,17 @@ Cada integrante é responsável pelo desenvolvimento da sua respectiva funcional
 - **`PATCH /api/subscriptions/:id/toggle`**: Alterna o status de cancelado/ativo de uma assinatura.
 
 ### 5.4. Módulo Trava Cooldown 48h
-- **`GET /api/cooldown`**: Retorna os desejos de consumo em período de reflexão.
-- **`POST /api/cooldown`**: Cadastra um novo item na trava de 48h.
-- **`PATCH /api/cooldown/:id/quiz`**: Salva as respostas das perguntas reflexivas diárias.
+- **`GET /api/cooldown`**: Retorna os desejos em quarentena (cada um já com Score de Impulso, fase temporal e marcos) mais o resumo da trava.
+  - *Resposta:* `{ "items": [...], "resumo": { "valorRetido": 2478.80, "riscoCritico": 1, "economiaTotal": 240.00, ... }, "categorias": [...], "marcos": [...] }`
+- **`GET /api/cooldown/:id`**: Retorna um desejo específico com o cálculo atualizado.
+- **`POST /api/cooldown`**: Cadastra um novo item na trava de 48h, já com o questionário reflexivo.
+  - *Payload:* `{ "item": "Fone bluetooth", "preco": 1299.90, "categoria": "eletronicos", "quiz": { "necessidadeReal": false, "usoPrevisto": "raro", "alternativas": "O fone atual funciona" } }`
+- **`PATCH /api/cooldown/:id/quiz`**: Salva as respostas das perguntas reflexivas diárias e recalcula o score.
+- **`PATCH /api/cooldown/:id/desisti`**: Encerra a quarentena como desistência (o valor do item entra na economia).
+- **`PATCH /api/cooldown/:id/comprei`**: Encerra a quarentena como compra realizada (não gera economia).
+- **`GET /api/cooldown/auditoria`**: Histórico de desfechos, montante poupado pelas compras canceladas e taxa de desistência.
+
+> **Motor preditivo (`cooldownModel.js`):** o *Impulse Risk Score* vai de 0 a 100 e cruza três eixos — peso do item na renda mensal (50 pts), custo em dias úteis de trabalho pelo valor-hora do Perfil (30 pts) e as respostas do questionário reflexivo (20 pts) —, classificando o gasto em **Baixo** (< 35), **Médio** (35 a 64) ou **Crítico** (≥ 65). As 48h são contadas de forma regressiva a partir da data de inclusão, com verificação dos marcos de **12h, 24h e 48h** e as fases *impulso → análise → decisão → liberado*.
 
 ### 5.5. Módulo Orçamento dos 3 Potes
 - **`GET /api/pots`**: Retorna os limites 50/30/20, gastos do mês, saldo, percentual consumido, burn rate diário, projeção de esgotamento e status de alerta de cada pote.

@@ -179,6 +179,27 @@ export const fetchPotes = async (salarioActual) => {
 
 export const getAssinaturas = () => request('/subscriptions');
 export const getCooldown = () => request('/cooldown');
+
+export const criarDesejoCooldown = (desejo) =>
+  request('/cooldown', {
+    method: 'POST',
+    body: JSON.stringify(desejo),
+  });
+
+export const responderQuizCooldown = (id, respostas) =>
+  request(`/cooldown/${id}/quiz`, {
+    method: 'PATCH',
+    body: JSON.stringify(respostas),
+  });
+
+// Auditoria de desfecho: encerra a quarentena das 48h
+export const desistirDesejoCooldown = (id) =>
+  request(`/cooldown/${id}/desisti`, { method: 'PATCH' });
+
+export const comprarDesejoCooldown = (id) =>
+  request(`/cooldown/${id}/comprei`, { method: 'PATCH' });
+
+export const getAuditoriaCooldown = () => request('/cooldown/auditoria');
 export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
 
 export const getLancamentosPotes = (mes, categoria) => {
@@ -241,6 +262,26 @@ export const ApiService = {
 
   getCooldownItems: async () => {
     return getCooldown();
+  },
+
+  createCooldownItem: async (desejo) => {
+    return criarDesejoCooldown(desejo);
+  },
+
+  answerCooldownQuiz: async (id, respostas) => {
+    return responderQuizCooldown(id, respostas);
+  },
+
+  giveUpCooldownItem: async (id) => {
+    return desistirDesejoCooldown(id);
+  },
+
+  buyCooldownItem: async (id) => {
+    return comprarDesejoCooldown(id);
+  },
+
+  getCooldownAudit: async () => {
+    return getAuditoriaCooldown();
   },
 
   toggleSubscription: async (id) => {

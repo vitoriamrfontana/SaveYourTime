@@ -1,5 +1,5 @@
 const ApiError = require("../utils/ApiError");
-const { CATEGORIAS } = require("../models/subscriptionsModel");
+const { CATEGORIAS, TIPOS_POR_CATEGORIA } = require("../models/subscriptionsModel");
 
 /**
  * validateCreateSubscription - valida o payload de POST /api/subscriptions
@@ -13,6 +13,18 @@ const { CATEGORIAS } = require("../models/subscriptionsModel");
     return next(
       ApiError.badRequest(`O campo 'categoria' deve ser um destes: ${CATEGORIAS.join(", ")}.`)
     );
+  }
+
+  // Sprint 3: o tipo é opcional, mas se vier precisa pertencer à categoria
+  if (req.body.tipo !== undefined) {
+    const tiposDaCategoria = TIPOS_POR_CATEGORIA[req.body.categoria || "outros"] || [];
+    if (!tiposDaCategoria.includes(req.body.tipo)) {
+      return next(
+        ApiError.badRequest(
+          `O campo 'tipo' não pertence à categoria informada. Tipos válidos: ${tiposDaCategoria.join(", ") || "nenhum"}.`
+        )
+      );
+    }
   }
 
   if (!nome || typeof nome !== "string" || nome.trim().length === 0) {
@@ -41,11 +53,38 @@ const { CATEGORIAS } = require("../models/subscriptionsModel");
 function validateIdParam(req, res, next) {
   const { id } = req.params;
 
-  if (!id || isNaN(Number(id))) {
-    return next(ApiError.badRequest("O parâmetro 'id' deve ser numérico."));
+  // Sprint 3: aceita só inteiros positivos (antes "1.5" e "-1" passavam)
+  if (!id || !Number.isInteger(Number(id)) || Number(id) <= 0) {
+    return next(ApiError.badRequest("O parâmetro 'id' deve ser um número inteiro positivo."));
   }
 
   next();
 }
 
-module.exports = { validateCreateSubscription, validateIdParam };
+/**
+ * validateUsageCheck - valida o payload de POST /api/subscriptions/:id/usage-check.
+ * frequenciaUso = quantas vezes a pessoa usou o serviço no último mês.
+ */
+function validateUsageCheck(req, res, next) {
+  const { frequenciaUso } = req.body;
+
+  if (
+    frequenciaUso === undefined ||
+    frequenciaUso === null ||
+    typeof frequenciaUso === "boolean" ||
+    String(frequenciaUso).trim() === ""
+  ) {
+    return next(ApiError.badRequest("O campo 'frequenciaUso' é obrigatório."));
+  }
+
+  const usos = Number(frequenciaUso);
+  if (!Number.isInteger(usos) || usos < 0 || usos > 1000) {
+    return next(
+      ApiError.badRequest("O campo 'frequenciaUso' deve ser um número inteiro entre 0 e 1000.")
+    );
+  }
+
+  next();
+}
+
+module.exports = { validateCreateSubscription, validateIdParam, validateUsageCheck };

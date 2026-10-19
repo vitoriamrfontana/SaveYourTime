@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { usePotsController } from '../controllers/PotsController';
 import { CORES_STATUS } from '../models/Pots';
+import { checkPurchaseBudgetImpact } from '../services/api';
 
 const CATEGORIAS = [
   { chave: 'sobrevivencia', nome: 'Necessidades', percentual: 50 },
@@ -112,6 +113,11 @@ export default function Pots() {
   const [valor, setValor] = useState('');
   const [descricao, setDescricao] = useState('');
   const [data, setData] = useState(dataHoje());
+  const [valorCompra, setValorCompra] = useState('');
+  const [categoriaCompra, setCategoriaCompra] = useState('estiloVida');
+  const [resultadoCompra, setResultadoCompra] = useState(null);
+  const [verificandoCompra, setVerificandoCompra] = useState(false);
+  const [erroCompra, setErroCompra] = useState('');
 
   const transacoes = useMemo(() => {
     return pots
@@ -151,6 +157,27 @@ export default function Pots() {
       fecharModal();
     } catch (error) {
       Alert.alert('Não foi possível salvar', error.message);
+    }
+  };
+
+  const verificarCompra = async () => {
+    const valorNumerico = Number(String(valorCompra).replace(',', '.'));
+    if (!Number.isFinite(valorNumerico) || valorNumerico <= 0) {
+      setErroCompra('Informe um valor maior que zero.');
+      setResultadoCompra(null);
+      return;
+    }
+
+    setVerificandoCompra(true);
+    setErroCompra('');
+    setResultadoCompra(null);
+    try {
+      const resultado = await checkPurchaseBudgetImpact(valorNumerico, categoriaCompra);
+      setResultadoCompra(resultado);
+    } catch (error) {
+      setErroCompra(error.message || 'Não foi possível simular esta compra.');
+    } finally {
+      setVerificandoCompra(false);
     }
   };
 
@@ -214,6 +241,119 @@ export default function Pots() {
       {erro ? <Text style={styles.erroInline}>{erro}</Text> : null}
 
       {potsComDias.map((pote) => <BarraPote key={pote.chave} pote={pote} />)}
+
+      <View style={styles.simuladorCard}>
+        <Text style={styles.simuladorTitulo}>🛍️ Posso Comprar?</Text>
+        <Text style={styles.simuladorSubtitulo}>
+          Simule uma compra antes de gastar e veja o impacto no teto 50-30-20.
+        </Text>
+
+        <Text style={styles.label}>Valor da compra (R$)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Ex.: 249,90"
+          placeholderTextColor="#64748b"
+          keyboardType="decimal-pad"
+          value={valorCompra}
+          onChangeText={(texto) => {
+            setValorCompra(texto);
+            setResultadoCompra(null);
+            setErroCompra('');
+          }}
+        />
+
+        <Text style={styles.label}>Categoria do gasto</Text>
+        <View style={styles.categorias}>
+          {CATEGORIAS.map((item) => (
+            <Pressable
+              key={`compra-${item.chave}`}
+              style={[
+                styles.categoriaBotao,
+                categoriaCompra === item.chave && styles.categoriaSelecionada,
+              ]}
+              onPress={() => {
+                setCategoriaCompra(item.chave);
+                setResultadoCompra(null);
+                setErroCompra('');
+              }}
+            >
+              <Text style={[
+                styles.categoriaTexto,
+                categoriaCompra === item.chave && styles.categoriaTextoSelecionado,
+              ]}>
+                {item.percentual}% · {item.nome}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {erroCompra ? <Text style={styles.erroInline}>{erroCompra}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.botaoSalvar, verificandoCompra && styles.botaoDesabilitado]}
+          onPress={verificarCompra}
+          disabled={verificandoCompra}
+        >
+          {verificandoCompra
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.botaoSalvarTexto}>Verificar impacto</Text>}
+        </TouchableOpacity>
+
+        {resultadoCompra ? (
+          <View style={[
+            styles.resultadoCompra,
+            resultadoCompra.status === 'liberada' ? styles.resultadoVerde
+              : resultadoCompra.status === 'atencao' ? styles.resultadoAmarelo
+                : styles.resultadoVermelho,
+          ]}>
+            <Text style={styles.parecerCompra}>{resultadoCompra.parecer}</Text>
+            <Text style={styles.mensagemCompra}>{resultadoCompra.mensagem}</Text>
+            <View style={styles.resumoCompraLinha}>
+              <View style={styles.resumoCompraItem}>
+                <Text style={styles.resumoCompraLabel}>Saldo atual</Text>
+                <Text style={styles.resumoCompraValor}>{dinheiro(resultadoCompra.saldoAtual)}</Text>
+              </View>
+              <View style={styles.resumoCompraItem}>
+                <Text style={styles.resumoCompraLabel}>Após a compra</Text>
+                <Text style={styles.resumoCompraValor}>{dinheiro(resultadoCompra.saldoProjetado)}</Text>
+              </View>
+            </View>
+
+            <Text style={styles.comparativoTitulo}>Potes: antes × depois</Text>
+            {resultadoCompra.pots.map((pote) => {
+              const antes = pote.limite > 0
+                ? Math.min(Math.max((pote.gastoAtual / pote.limite) * 100, 0), 100)
+                : 0;
+              const depois = Number(pote.percentualVisualProjetado || 0);
+              const corDepois = pote.percentualProjetado > 100
+                ? CORES_STATUS.estourado
+                : pote.percentualProjetado >= 90
+                  ? '#f59e0b'
+                  : CORES_STATUS.normal;
+              return (
+                <View key={`comparativo-${pote.chave}`} style={styles.comparativoPote}>
+                  <View style={styles.comparativoCabecalho}>
+                    <Text style={styles.comparativoNome}>{pote.nome}</Text>
+                    <Text style={styles.comparativoPercentual}>
+                      {antes.toFixed(0)}% → {pote.percentualProjetado.toFixed(0)}%
+                    </Text>
+                  </View>
+                  <View style={styles.barraComparativaFundo}>
+                    <View style={[styles.barraComparativa, { width: `${antes}%`, backgroundColor: '#64748b' }]} />
+                  </View>
+                  <View style={[styles.barraComparativaFundo, styles.barraDepoisFundo]}>
+                    <View style={[styles.barraComparativa, { width: `${depois}%`, backgroundColor: corDepois }]} />
+                  </View>
+                  <Text style={styles.comparativoSaldo}>
+                    Saldo após: {dinheiro(pote.saldoProjetado)}
+                  </Text>
+                </View>
+              );
+            })}
+            <Text style={styles.legendaComparativo}>Cinza: situação atual · Colorido: projeção após a compra</Text>
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.extratoCard}>
         <View style={styles.extratoHeader}>
@@ -356,6 +496,30 @@ const styles = StyleSheet.create({
   erroInline: { color: '#f87171', fontSize: 11, marginBottom: 10 },
   botaoRetry: { backgroundColor: '#0284c7', padding: 12, borderRadius: 8, marginTop: 10 },
   botaoTexto: { color: '#fff', fontWeight: '600' },
+  simuladorCard: { backgroundColor: '#0f172a', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#334155', marginTop: 4, marginBottom: 14 },
+  simuladorTitulo: { color: '#f8fafc', fontSize: 19, fontWeight: '900' },
+  simuladorSubtitulo: { color: '#94a3b8', fontSize: 12, lineHeight: 18, marginTop: 5 },
+  botaoDesabilitado: { opacity: 0.65 },
+  resultadoCompra: { borderWidth: 1, borderRadius: 12, padding: 13, marginTop: 16 },
+  resultadoVerde: { backgroundColor: '#052e16', borderColor: '#22c55e' },
+  resultadoAmarelo: { backgroundColor: '#422006', borderColor: '#f59e0b' },
+  resultadoVermelho: { backgroundColor: '#450a0a', borderColor: '#ef4444' },
+  parecerCompra: { color: '#f8fafc', fontSize: 15, fontWeight: '900' },
+  mensagemCompra: { color: '#e2e8f0', fontSize: 12, lineHeight: 18, marginTop: 6 },
+  resumoCompraLinha: { flexDirection: 'row', gap: 12, marginTop: 14, marginBottom: 8 },
+  resumoCompraItem: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', borderRadius: 8, padding: 10 },
+  resumoCompraLabel: { color: '#cbd5e1', fontSize: 10 },
+  resumoCompraValor: { color: '#fff', fontSize: 14, fontWeight: '800', marginTop: 4 },
+  comparativoTitulo: { color: '#f8fafc', fontSize: 13, fontWeight: '800', marginTop: 12, marginBottom: 10 },
+  comparativoPote: { marginBottom: 12 },
+  comparativoCabecalho: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5, gap: 8 },
+  comparativoNome: { color: '#e2e8f0', fontSize: 11, fontWeight: '700', flex: 1 },
+  comparativoPercentual: { color: '#cbd5e1', fontSize: 10, fontWeight: '800' },
+  barraComparativaFundo: { height: 8, backgroundColor: '#1e293b', borderRadius: 5, overflow: 'hidden' },
+  barraDepoisFundo: { marginTop: 4 },
+  barraComparativa: { height: '100%', borderRadius: 5 },
+  comparativoSaldo: { color: '#94a3b8', fontSize: 10, marginTop: 4 },
+  legendaComparativo: { color: '#64748b', fontSize: 10, marginTop: 2 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(2, 6, 23, 0.75)', justifyContent: 'flex-end' },
   modalCard: { backgroundColor: '#0f172a', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, borderWidth: 1, borderColor: '#334155' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 },

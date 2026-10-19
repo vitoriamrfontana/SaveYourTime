@@ -9,6 +9,16 @@ function enviarErro(res, status, message) {
 }
 
 const PotsController = {
+  verificarImpactoCompra: (req, res) => {
+    try {
+      const { valor, categoria, mes } = req.body || {};
+      const resultado = PotsModel.verificarImpactoCompra({ valor, categoria, mes });
+      return apiResponse(res, 200, resultado);
+    } catch (error) {
+      return enviarErro(res, 400, error.message);
+    }
+  },
+
   getResumo: (req, res) => {
     try {
       const mes = req.query.mes || undefined;

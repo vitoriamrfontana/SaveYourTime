@@ -23,8 +23,8 @@ const listSubscriptions = asyncHandler(async (req, res) => {
 
 // POST /api/subscriptions
 const createSubscription = asyncHandler(async (req, res) => {
-  const { nome, valorMensal, categoria } = req.body;
-  const novaAssinatura = subscriptionsModel.addSubscription({ nome, valorMensal, categoria });
+const { nome, valorMensal, categoria, tipo } = req.body;
+const novaAssinatura = subscriptionsModel.addSubscription({ nome, valorMensal, categoria, tipo });
 
   return apiResponse(res, 201, novaAssinatura);
 });
@@ -58,11 +58,31 @@ const getInsights = asyncHandler(async (req, res) => {
 const getAuditoria = asyncHandler(async (req, res) => {
   return apiResponse(res, 200, subscriptionsModel.getAuditoria());
 });
+// GET /api/subscriptions/redundancies
+// Sprint 3: grupos de assinaturas ativas que fazem a mesma coisa (ex.: dois streamings de vídeo)
+const detectarRedundancias = asyncHandler(async (req, res) => {
+  return apiResponse(res, 200, subscriptionsModel.detectarRedundancias());
+});
 
+// POST /api/subscriptions/:id/usage-check  body: { frequenciaUso }
+// Sprint 3: custo por uso = mensalidade / quantas vezes usou no mês
+const calcularCustoUso = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const resultado = subscriptionsModel.calcularCustoUso(id, req.body.frequenciaUso);
+
+  if (!resultado) {
+    throw ApiError.notFound(`Assinatura com id ${id} não encontrada.`);
+  }
+
+  return apiResponse(res, 200, resultado);
+});
 module.exports = {
+  
   listSubscriptions,
   createSubscription,
   toggleSubscription,
   getInsights,
   getAuditoria,
+  detectarRedundancias,
+  calcularCustoUso,
 };

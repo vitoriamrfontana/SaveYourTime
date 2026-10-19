@@ -13,12 +13,22 @@
  *   3. Auditoria de desfecho - registra desistência ou compra e soma quanto
  *      dinheiro (e quantas horas de trabalho) as desistências pouparam.
  *
+ * Sprint 3 - Quarentena Estendida:
+ *
+ *   4. Quarentenas proporcionais - o prazo de reflexão cresce com o peso do
+ *      item na renda: 48h para itens cotidianos, 7 dias para compras
+ *      intermediárias e 30 dias ("Regra dos 30 Dias") para compras que
+ *      superam 40% do salário líquido. Fases e marcos escalam junto.
+ *   5. Streak de Disciplina - dias contínuos sem compras por impulso (compra
+ *      registrada antes de a quarentena terminar).
+ *
  * O perfil do usuário (salário / valor-hora) entra por parâmetro, vindo do
  * controller, para não acoplar este model ao userModel.
  */
 
 const PERIODO_COOLDOWN_HORAS = 48;
 const MS_POR_HORA = 60 * 60 * 1000;
+const MS_POR_DIA = 24 * MS_POR_HORA;
 const HORAS_DIA_UTIL = 8;
 
 // Pesos do Impulse Risk Score (somam 100 pontos)
@@ -49,6 +59,39 @@ const STATUS = {
 
 const DESFECHOS = { DESISTIU: 'desistiu', COMPROU: 'comprou' };
 
+/**
+ * Quarentenas proporcionais, da mais longa para a mais curta. O item cai no
+ * primeiro período cujo percentual da renda ele supera.
+ */
+const PERIODOS = [
+  {
+    chave: 'estendido',
+    horas: 30 * 24,
+    rotulo: '30 dias',
+    descricao: 'Alto impacto: mais de 40% do salário líquido',
+    percentualRendaAcimaDe: 40,
+  },
+  {
+    chave: 'intermediario',
+    horas: 7 * 24,
+    rotulo: '7 dias',
+    descricao: 'Compra intermediária: mais de 10% do salário líquido',
+    percentualRendaAcimaDe: 10,
+  },
+  {
+    chave: 'curto',
+    horas: PERIODO_COOLDOWN_HORAS,
+    rotulo: '48 horas',
+    descricao: 'Item cotidiano',
+    percentualRendaAcimaDe: 0,
+  },
+];
+const PERIODO_PADRAO = 'curto';
+
+// Metas do Fogo da Disciplina, em dias seguidos sem compra por impulso
+const METAS_STREAK_DIAS = [3, 7, 14, 30, 60, 90, 180, 365];
+const DIAS_STREAK_DEMO = 14;
+
 const CATEGORIAS = ['eletronicos', 'vestuario', 'lazer', 'casa', 'outros'];
 const CATEGORIA_PADRAO = 'outros';
 
@@ -59,54 +102,84 @@ const PONTOS_SEM_NECESSIDADE = 8;
 const PONTOS_NECESSIDADE_NEUTRO = 4;
 const PONTOS_TEM_ALTERNATIVA = 6;
 
-// Fases temporais da quarentena, em horas decorridas desde a inclusão
+// Fases temporais da quarentena, em fração do período (na régua de 48h:
+// 0-12h, 12-24h, 24-48h). Assim a quarentena de 30 dias escala junto.
 const FASES = [
   {
     chave: 'impulso',
     titulo: 'Impulso quente',
     de: 0,
-    ate: 12,
+    ate: 0.25,
     orientacao: 'O desejo ainda está no pico. Não pesquise preço, só deixe descansar.',
   },
   {
     chave: 'analise',
     titulo: 'Análise',
-    de: 12,
-    ate: 24,
+    de: 0.25,
+    ate: 0.5,
     orientacao: 'Hora de comparar alternativas e conferir se o item resolve algo real.',
   },
   {
     chave: 'decisao',
     titulo: 'Decisão',
-    de: 24,
-    ate: PERIODO_COOLDOWN_HORAS,
-    orientacao: 'Se ainda fizer sentido depois de dormir duas vezes, a compra é consciente.',
+    de: 0.5,
+    ate: 1,
+    orientacao: 'Se ainda fizer sentido depois de todo esse tempo esfriando, a compra é consciente.',
   },
   {
     chave: 'liberado',
     titulo: 'Liberado',
-    de: PERIODO_COOLDOWN_HORAS,
+    de: 1,
     ate: Infinity,
     orientacao: 'Reflexão concluída. Registre o desfecho: desisti ou comprei.',
   },
 ];
 
-// Marcos verificados na régua das 48h (questionário reflexivo diário)
-const MARCOS = [
-  { horas: 12, titulo: 'Primeiras 12h', pergunta: 'O desejo diminuiu depois de algumas horas?' },
-  { horas: 24, titulo: '24h de reflexão', pergunta: 'Você lembrou do item hoje sem abrir o app?' },
+// Marcos verificados ao longo da quarentena, em fração do período
+// (questionário reflexivo). Na régua de 48h caem em 12h, 24h e 48h.
+const MARCOS_FRACOES = [
+  { fracao: 0.25, titulo: 'Primeiras {d}', pergunta: 'O desejo diminuiu depois de um tempo?' },
+  { fracao: 0.5, titulo: '{d} de reflexão', pergunta: 'Você lembrou do item hoje sem abrir o app?' },
   {
-    horas: PERIODO_COOLDOWN_HORAS,
-    titulo: '48h - liberação',
+    fracao: 1,
+    titulo: '{d} - liberação',
     pergunta: 'Ainda vale trocar essas horas de trabalho por este item?',
   },
 ];
 
+/** 12 -> '12h' | 84 -> '3,5 dias' | 720 -> '30 dias' */
+function formatarDuracao(horas) {
+  if (horas <= PERIODO_COOLDOWN_HORAS) return `${horas}h`;
+  const dias = horas / 24;
+  return `${String(Math.round(dias * 10) / 10).replace('.', ',')} dias`;
+}
+
+/** 12 -> '12h' | 84 -> '3,5d' | 720 -> '30d' (rótulo curto da régua) */
+function formatarDuracaoCurta(horas) {
+  if (horas <= PERIODO_COOLDOWN_HORAS) return `${horas}h`;
+  return `${String(Math.round((horas / 24) * 10) / 10).replace('.', ',')}d`;
+}
+
+function marcosDoPeriodo(periodoHoras) {
+  return MARCOS_FRACOES.map((m) => {
+    const horas = m.fracao * periodoHoras;
+    return {
+      horas,
+      rotulo: formatarDuracaoCurta(horas),
+      titulo: m.titulo.replace('{d}', formatarDuracao(horas)),
+      pergunta: m.pergunta,
+    };
+  });
+}
+
+// Régua padrão de 48h (mantida para quem ainda lê os marcos fixos)
+const MARCOS = marcosDoPeriodo(PERIODO_COOLDOWN_HORAS);
 const MARCOS_HORAS = MARCOS.map((m) => m.horas);
 
 let desejos = [];
 let auditoria = [];
 let proximoId = 1;
+let inicioDisciplina = new Date().toISOString();
 
 function arredondar(valor) {
   return Math.round(Number(valor || 0) * 100) / 100;
@@ -123,6 +196,19 @@ function horasAtras(horas) {
 
 function categoriaValida(categoria) {
   return CATEGORIAS.includes(categoria) ? categoria : CATEGORIA_PADRAO;
+}
+
+function periodoPorChave(chave) {
+  return PERIODOS.find((p) => p.chave === chave) ?? null;
+}
+
+function periodoValido(chave) {
+  return periodoPorChave(chave) ? chave : PERIODO_PADRAO;
+}
+
+/** Versão enxuta do período que vai no item e no histórico. */
+function resumoPeriodo(periodo) {
+  return { chave: periodo.chave, horas: periodo.horas, rotulo: periodo.rotulo };
 }
 
 /**
@@ -172,6 +258,7 @@ function normalizarDesejo(bruto) {
     preco: arredondar(bruto.preco),
     categoria: categoriaValida(bruto.categoria),
     criadoEm: bruto.criadoEm ?? new Date().toISOString(),
+    periodo: periodoValido(bruto.periodo),
     quiz: normalizarQuiz(bruto.quiz),
     desfecho: bruto.desfecho ?? null,
   };
@@ -211,13 +298,41 @@ function seedPadrao() {
       criadoEm: horasAtras(52),
       quiz: { necessidadeReal: false, usoPrevisto: 'raro', alternativas: '' },
     },
+    {
+      id: 5,
+      item: 'Notebook gamer',
+      preco: 6499.0,
+      categoria: 'eletronicos',
+      criadoEm: horasAtras(9 * 24),
+      periodo: 'estendido',
+      quiz: { necessidadeReal: false, usoPrevisto: 'semanal', alternativas: 'Upgrade de memória no atual' },
+    },
+    {
+      id: 6,
+      item: 'Cadeira ergonômica',
+      preco: 899.0,
+      categoria: 'casa',
+      criadoEm: horasAtras(3 * 24),
+      periodo: 'intermediario',
+      quiz: { necessidadeReal: true, usoPrevisto: 'diario', alternativas: '' },
+    },
   ];
 }
 
-function inicializar(seed = seedPadrao()) {
+/**
+ * `inicioDisciplina` é de quando a contagem do streak começa (o primeiro dia
+ * monitorado). Sem ele, vale a inclusão mais antiga do seed.
+ */
+function inicializar(seed = seedPadrao(), opcoes = {}) {
   proximoId = 1;
   desejos = seed.map(normalizarDesejo);
   auditoria = [];
+
+  const maisAntigo = desejos.reduce(
+    (menor, d) => (new Date(d.criadoEm) < new Date(menor) ? d.criadoEm : menor),
+    new Date().toISOString()
+  );
+  inicioDisciplina = opcoes.inicioDisciplina ? paraIso(opcoes.inicioDisciplina) : maisAntigo;
 }
 
 /* ------------------------------------------------------------------ *
@@ -311,21 +426,22 @@ function calcularRiscoImpulso(preco, quiz, perfil = {}) {
  * 2. Controle de fases temporais
  * ------------------------------------------------------------------ */
 
-function faseDe(horasDecorridas) {
-  const fase =
-    FASES.find((f) => horasDecorridas >= f.de && horasDecorridas < f.ate) ?? FASES[FASES.length - 1];
+function faseDe(horasDecorridas, periodoHoras) {
+  const fracao = horasDecorridas / periodoHoras;
+  const fase = FASES.find((f) => fracao >= f.de && fracao < f.ate) ?? FASES[FASES.length - 1];
 
   return { chave: fase.chave, titulo: fase.titulo, orientacao: fase.orientacao };
 }
 
 /**
- * Cálculo regressivo exato das 48h a partir da data de inclusão, com o estado
- * de cada marco temporal (12h, 24h e 48h).
+ * Cálculo regressivo exato do período de quarentena (48h por padrão) a partir
+ * da data de inclusão, com o estado de cada marco temporal (25%, 50% e 100%
+ * do período: 12h, 24h e 48h na régua padrão).
  */
-function calcularFaseTemporal(criadoEm, agora = new Date()) {
+function calcularFaseTemporal(criadoEm, agora = new Date(), periodoHoras = PERIODO_COOLDOWN_HORAS) {
   const inicio = new Date(criadoEm).getTime();
   const referencia = agora instanceof Date ? agora.getTime() : new Date(agora).getTime();
-  const liberaEm = inicio + PERIODO_COOLDOWN_HORAS * MS_POR_HORA;
+  const liberaEm = inicio + periodoHoras * MS_POR_HORA;
 
   const msDecorridos = Math.max(referencia - inicio, 0);
   const msRestantes = Math.max(liberaEm - referencia, 0);
@@ -333,10 +449,8 @@ function calcularFaseTemporal(criadoEm, agora = new Date()) {
   const horasDecorridas = msDecorridos / MS_POR_HORA;
   const concluido = msRestantes === 0;
 
-  const marcos = MARCOS.map((marco) => ({
-    horas: marco.horas,
-    titulo: marco.titulo,
-    pergunta: marco.pergunta,
+  const marcos = marcosDoPeriodo(periodoHoras).map((marco) => ({
+    ...marco,
     previstoPara: new Date(inicio + marco.horas * MS_POR_HORA).toISOString(),
     atingido: horasDecorridas >= marco.horas,
   }));
@@ -344,16 +458,54 @@ function calcularFaseTemporal(criadoEm, agora = new Date()) {
   return {
     criadoEm: new Date(inicio).toISOString(),
     liberaEm: new Date(liberaEm).toISOString(),
-    periodoCooldownHoras: PERIODO_COOLDOWN_HORAS,
+    periodoCooldownHoras: periodoHoras,
     horasDecorridas: arredondar(horasDecorridas),
     horasRestantes: Math.ceil(msRestantes / MS_POR_HORA),
     segundosRestantes: Math.ceil(msRestantes / 1000),
-    progresso: arredondar(Math.min(horasDecorridas / PERIODO_COOLDOWN_HORAS, 1)),
+    progresso: arredondar(Math.min(horasDecorridas / periodoHoras, 1)),
     concluido,
-    fase: faseDe(horasDecorridas),
+    fase: faseDe(horasDecorridas, periodoHoras),
     marcos,
     proximoMarco: marcos.find((m) => !m.atingido) ?? null,
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. Quarentenas proporcionais (Regra dos 30 Dias)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Sugere o período de reflexão pelo peso do item no salário líquido:
+ * acima de 40% -> 30 dias, acima de 10% -> 7 dias, senão 48h. Sem salário
+ * no perfil, não há como medir o impacto e fica a quarentena padrão.
+ */
+function sugerirPeriodo(preco, perfil = {}) {
+  const salario = Number(perfil.salario) || 0;
+  const percentualRenda = salario > 0 ? (arredondar(preco) / salario) * 100 : null;
+
+  const periodo =
+    percentualRenda === null
+      ? periodoPorChave(PERIODO_PADRAO)
+      : PERIODOS.find((p) => percentualRenda > p.percentualRendaAcimaDe) ??
+        periodoPorChave(PERIODO_PADRAO);
+
+  const motivo =
+    percentualRenda === null
+      ? 'Sem salário cadastrado, a quarentena padrão de 48h é aplicada.'
+      : `O item equivale a ${arredondar(percentualRenda)}% do seu salário líquido: ${periodo.descricao.toLowerCase()}.`;
+
+  return {
+    ...periodo,
+    percentualRenda: percentualRenda === null ? null : arredondar(percentualRenda),
+    motivo,
+  };
+}
+
+/** true quando `chave` é um período mais curto do que `referencia`. */
+function periodoMaisCurto(chave, referencia) {
+  const periodo = periodoPorChave(chave);
+  const minimo = periodoPorChave(referencia);
+  return Boolean(periodo && minimo && periodo.horas < minimo.horas);
 }
 
 /* ------------------------------------------------------------------ *
@@ -368,7 +520,8 @@ function statusDe(desejo, tempo) {
 }
 
 function montarItem(desejo, perfil, agora) {
-  const tempo = calcularFaseTemporal(desejo.criadoEm, agora);
+  const periodo = periodoPorChave(desejo.periodo);
+  const tempo = calcularFaseTemporal(desejo.criadoEm, agora, periodo.horas);
   const risco = calcularRiscoImpulso(desejo.preco, desejo.quiz, perfil);
 
   return {
@@ -376,6 +529,7 @@ function montarItem(desejo, perfil, agora) {
     item: desejo.item,
     preco: desejo.preco,
     categoria: desejo.categoria,
+    periodo: resumoPeriodo(periodo),
     criadoEm: desejo.criadoEm,
     liberaEm: tempo.liberaEm,
     status: statusDe(desejo, tempo),
@@ -427,6 +581,9 @@ function getResumo({ perfil = {}, agora = new Date() } = {}) {
     valorRetido: arredondar(somar(itens, 'preco')),
     horasSuorRetidas: arredondar(somar(itens, 'horasSuor')),
     riscoCritico: itens.filter((i) => i.risco.nivel === NIVEIS_RISCO.CRITICO).length,
+    porPeriodo: Object.fromEntries(
+      PERIODOS.map((p) => [p.chave, itens.filter((i) => i.periodo.chave === p.chave).length])
+    ),
     economiaTotal,
     horasPoupadas,
     periodoCooldownHoras: PERIODO_COOLDOWN_HORAS,
@@ -434,12 +591,14 @@ function getResumo({ perfil = {}, agora = new Date() } = {}) {
   };
 }
 
-function addItem({ item, preco, categoria, quiz }, { perfil = {}, agora = new Date() } = {}) {
+/** `periodo` é a chave da quarentena (curto | intermediario | estendido); padrão 48h. */
+function addItem({ item, preco, categoria, quiz, periodo }, { perfil = {}, agora = new Date() } = {}) {
   const novoDesejo = normalizarDesejo({
     id: proximoId,
     item,
     preco,
     categoria,
+    periodo,
     quiz,
     criadoEm: paraIso(agora),
   });
@@ -496,6 +655,7 @@ function registrarDesfecho(id, tipo, { perfil = {}, agora = new Date() } = {}) {
     item: desejo.item,
     preco: desejo.preco,
     categoria: desejo.categoria,
+    periodo: snapshot.periodo,
     ...desejo.desfecho,
   });
 
@@ -523,7 +683,62 @@ function getAuditoria() {
   };
 }
 
-inicializar();
+/* ------------------------------------------------------------------ *
+ * 5. Streak de Disciplina
+ * ------------------------------------------------------------------ */
+
+/**
+ * Compra por impulso = 'comprei' registrado antes de a quarentena terminar.
+ * Comprar depois do período de reflexão é decisão consciente e não quebra
+ * a sequência.
+ */
+function ehCompraImpulsiva(registro) {
+  return registro.tipo === DESFECHOS.COMPROU && !registro.concluiuCooldown;
+}
+
+/**
+ * Dias contínuos (blocos de 24h) sem compra por impulso, contados desde a
+ * última compra impulsiva ou, se nunca houve, desde o início do monitoramento.
+ * Também devolve o recorde e a próxima meta.
+ */
+function calcularStreakDisciplina({ agora = new Date() } = {}) {
+  const referencia = new Date(agora).getTime();
+  const inicio = new Date(inicioDisciplina).getTime();
+
+  const impulsivas = auditoria
+    .filter(ehCompraImpulsiva)
+    .sort((a, b) => new Date(a.registradoEm) - new Date(b.registradoEm));
+
+  // Cada compra impulsiva reinicia a contagem: a sequência atual parte da última
+  const quebras = [inicio, ...impulsivas.map((r) => new Date(r.registradoEm).getTime())].sort(
+    (a, b) => a - b
+  );
+  const inicioSequencia = quebras[quebras.length - 1];
+  const diasSeguidos = Math.floor(Math.max(referencia - inicioSequencia, 0) / MS_POR_DIA);
+
+  let recorde = diasSeguidos;
+  for (let i = 1; i < quebras.length; i += 1) {
+    recorde = Math.max(recorde, Math.floor((quebras[i] - quebras[i - 1]) / MS_POR_DIA));
+  }
+
+  const meta = METAS_STREAK_DIAS.find((d) => d > diasSeguidos) ?? null;
+  const ultima = impulsivas[impulsivas.length - 1] ?? null;
+  const rotuloDias = diasSeguidos === 1 ? '1 dia seguido' : `${diasSeguidos} dias seguidos`;
+
+  return {
+    diasSeguidos,
+    recorde,
+    inicioSequencia: new Date(inicioSequencia).toISOString(),
+    totalComprasImpulsivas: impulsivas.length,
+    ultimaCompraImpulsiva: ultima
+      ? { item: ultima.item, preco: ultima.preco, registradoEm: ultima.registradoEm }
+      : null,
+    proximaMeta: meta === null ? null : { dias: meta, faltam: meta - diasSeguidos },
+    mensagem: `Fogo da Disciplina: ${rotuloDias} sem compras por impulso`,
+  };
+}
+
+inicializar(seedPadrao(), { inicioDisciplina: horasAtras(DIAS_STREAK_DEMO * 24) });
 
 module.exports = {
   getItems,
@@ -535,6 +750,11 @@ module.exports = {
   getAuditoria,
   calcularRiscoImpulso,
   calcularFaseTemporal,
+  sugerirPeriodo,
+  periodoMaisCurto,
+  calcularStreakDisciplina,
+  ehCompraImpulsiva,
+  PERIODOS,
   CATEGORIAS,
   USOS_PREVISTOS,
   STATUS,

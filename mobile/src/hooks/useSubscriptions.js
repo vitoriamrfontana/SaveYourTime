@@ -22,6 +22,7 @@ export function useSubscriptions() {
   const [economia, setEconomia] = useState({ economiaMensal: 0, economiaAnual: 0 });
   const [insights, setInsights] = useState(null);
   const [auditoria, setAuditoria] = useState([]);
+  const [redundancias, setRedundancias] = useState(null);
   const [categoriaFiltro, setCategoriaFiltro] = useState(TODAS_CATEGORIAS);
   const [ordenacao, setOrdenacao] = useState(ORDENACOES.PADRAO);
   const [loading, setLoading] = useState(true);
@@ -40,6 +41,13 @@ export function useSubscriptions() {
       setEconomia(lista.economia);
       setInsights(dadosInsights);
       setAuditoria(dadosAuditoria);
+      
+      // Sprint 3: buscado à parte, para que uma falha aqui não esconda a lista
+      try {
+        setRedundancias(await ApiService.getSubscriptionRedundancies());
+      } catch {
+        setRedundancias(null);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -78,7 +86,16 @@ export function useSubscriptions() {
     },
     [fetchData]
   );
-
+  // Sprint 3: calculadora de custo por uso. Devolve o resultado para o modal
+  // e recarrega a tela, porque a sugestão de pausa pode mudar. Erros sobem para o modal.
+  const checkUsage = useCallback(
+    async (id, frequenciaUso) => {
+      const resultado = await ApiService.checkSubscriptionUsage(id, frequenciaUso);
+      await fetchData({ silent: true });
+      return resultado;
+    },
+    [fetchData]
+  );
   // Lista já filtrada por categoria e ordenada por valor, pronta para a view
   const subscriptionsVisiveis = useMemo(() => {
     const filtradas =
@@ -113,5 +130,8 @@ export function useSubscriptions() {
     setCategoriaFiltro,
     ordenacao,
     setOrdenacao,
+    // Sprint 3
+    redundancias,
+    checkUsage,
   };
 }

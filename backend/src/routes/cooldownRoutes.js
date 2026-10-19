@@ -12,9 +12,12 @@ const cooldownController = require("../controllers/cooldownController");
 
 router.get("/", cooldownController.listItems);
 router.get("/auditoria", cooldownController.getAuditoria);
+router.get("/streak", cooldownController.getStreakDisciplina);
 router.get("/:id", cooldownController.getItem);
 
 router.post("/", cooldownController.createItem);
+// Quarentena proporcional (48h / 7 dias / 30 dias)
+router.post("/extended", cooldownController.criarCooldownEstendido);
 
 router.patch("/:id/quiz", cooldownController.responderQuiz);
 

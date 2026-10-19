@@ -241,6 +241,74 @@ function removerLancamento(id) {
   return { ...removido };
 }
 
+
+function verificarImpactoCompra({ valor, categoria, mes = obterMesAtual() }) {
+  validarCategoria(categoria);
+  const valorCompra = validarValor(valor);
+  const resumo = calcularResumo(mes);
+  const poteSelecionado = resumo.pots.find((pote) => pote.chave === categoria);
+
+  const pots = resumo.pots.map((pote) => {
+    const compraNestePote = pote.chave === categoria ? valorCompra : 0;
+    const gastoProjetado = arredondar(pote.gastoAtual + compraNestePote);
+    const saldoProjetado = arredondar(pote.limite - gastoProjetado);
+    const percentualProjetado = pote.limite > 0
+      ? arredondar((gastoProjetado / pote.limite) * 100)
+      : (gastoProjetado > 0 ? 100 : 0);
+
+    return {
+      chave: pote.chave,
+      nome: pote.nome,
+      percentualOrcamento: pote.percentualOrcamento,
+      limite: pote.limite,
+      gastoAtual: pote.gastoAtual,
+      saldoAtual: pote.saldo,
+      percentualAtual: pote.percentualTeto,
+      gastoProjetado,
+      saldoProjetado,
+      percentualProjetado,
+      percentualVisualProjetado: Math.min(Math.max(percentualProjetado, 0), 100),
+      afetado: pote.chave === categoria,
+    };
+  });
+
+  const projetado = pots.find((pote) => pote.chave === categoria);
+  let parecer;
+  let status;
+  let mensagem;
+
+  if (projetado.gastoProjetado > projetado.limite) {
+    status = 'violacao';
+    parecer = 'Violação de Teto Orçamentário';
+    mensagem = `Esta compra ultrapassaria o teto de ${projetado.nome} em ${arredondar(Math.abs(projetado.saldoProjetado)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+  } else if (projetado.limite > 0 && projetado.percentualProjetado >= 90) {
+    status = 'atencao';
+    parecer = 'Atenção - Margem Estreita';
+    mensagem = `A compra cabe no orçamento, mas deixaria apenas ${arredondar(projetado.saldoProjetado).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} disponíveis neste pote.`;
+  } else {
+    status = 'liberada';
+    parecer = 'Compra Liberada';
+    mensagem = `A compra cabe no teto de ${projetado.nome} e manteria uma margem confortável neste mês.`;
+  }
+
+  return {
+    categoria,
+    categoriaNome: poteSelecionado.nome,
+    valor: valorCompra,
+    mes: resumo.mes,
+    status,
+    parecer,
+    mensagem,
+    limite: projetado.limite,
+    gastoAtual: projetado.gastoAtual,
+    saldoAtual: projetado.saldoAtual,
+    gastoProjetado: projetado.gastoProjetado,
+    saldoProjetado: projetado.saldoProjetado,
+    percentualProjetado: projetado.percentualProjetado,
+    pots,
+  };
+}
+
 function resetar() {
   lancamentos = [];
   proximoId = 1;
@@ -249,6 +317,7 @@ function resetar() {
 module.exports = {
   CATEGORIAS,
   getResumo: calcularResumo,
+  verificarImpactoCompra,
   listarLancamentos,
   adicionarLancamento,
   removerLancamento,

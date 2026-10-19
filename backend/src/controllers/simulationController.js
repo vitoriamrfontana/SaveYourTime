@@ -86,6 +86,38 @@ const SimulationController = {
         error: error.message
       });
     }
+  },
+
+  getEvolucaoHealthScore: (req, res) => {
+    try {
+      const timelineData = SimulationModel.getHealthScoreTimeline();
+      return res.status(200).json({
+        success: true,
+        data: timelineData
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Erro ao buscar evolucao temporal do Financial Health Score.',
+        error: error.message
+      });
+    }
+  },
+
+  getConquistas: (req, res) => {
+    try {
+      const conquistasData = SimulationModel.getConquistas();
+      return res.status(200).json({
+        success: true,
+        data: conquistasData
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Erro ao buscar conquistas e badges do usuario.',
+        error: error.message
+      });
+    }
   }
 };
 

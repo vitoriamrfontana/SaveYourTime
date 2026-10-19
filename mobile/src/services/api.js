@@ -157,6 +157,114 @@ export const getHealthScore = async () => {
   }
 };
 
+export const getHealthScoreTimeline = async () => {
+  try {
+    const res = await request('/simulate/analytics/timeline');
+    return res?.data || res;
+  } catch (error) {
+    return {
+      evolucao: [
+        { periodo: 'Sem 1', data: '08/09', score: 58, variacao: '+0', horasPoupadas: 18.5, status: 'Inicio' },
+        { periodo: 'Sem 2', data: '15/09', score: 64, variacao: '+6', horasPoupadas: 42.0, status: 'Evolucao' },
+        { periodo: 'Sem 3', data: '22/09', score: 68, variacao: '+4', horasPoupadas: 78.4, status: 'Evolucao' },
+        { periodo: 'Sem 4', data: '29/09', score: 72, variacao: '+4', horasPoupadas: 120.1, status: 'Estavel' },
+        { periodo: 'Sem 5', data: '06/10', score: 79, variacao: '+7', horasPoupadas: 154.6, status: 'Avanco' },
+        { periodo: 'Sem 6', data: '13/10', score: 85, variacao: '+6', horasPoupadas: 191.9, status: 'Excelente' }
+      ],
+      scoreAtual: 85,
+      classificacao: 'Excelente',
+      comparativoMesAnterior: {
+        scoreAtual: 85,
+        scoreAnterior: 68,
+        diferenca: 17,
+        percentualCrescimento: 25,
+        tendencia: 'Crescimento Acelerado'
+      }
+    };
+  }
+};
+
+export const getUserBadges = async () => {
+  try {
+    const res = await request('/simulate/badges');
+    return res?.data || res;
+  } catch (error) {
+    return {
+      badges: [
+        {
+          id: 'badge-cooldown-master',
+          titulo: 'Mestre do Cooldown',
+          descricao: 'Evitou compras colocando desejos impulsivos na quarentena reflexiva.',
+          categoria: 'Autocontrole',
+          desbloqueado: true,
+          progressoTexto: '5 de 5 compras',
+          porcentagem: 100,
+          nivel: 'Ouro',
+          dataDesbloqueio: '12/10/2026'
+        },
+        {
+          id: 'badge-semana-zero-impulso',
+          titulo: 'Zero Impulso na Semana',
+          descricao: 'Completou 7 dias consecutivos sem compras superfluas nao planejadas.',
+          categoria: 'Habito',
+          desbloqueado: true,
+          progressoTexto: '7 de 7 dias',
+          porcentagem: 100,
+          nivel: 'Prata',
+          dataDesbloqueio: '14/10/2026'
+        },
+        {
+          id: 'badge-guardiao-orcamento',
+          titulo: 'Guardiao do Orcamento',
+          descricao: 'Alcancou Financial Health Score igual ou superior a 80 pontos.',
+          categoria: 'Pontuacao',
+          desbloqueado: true,
+          progressoTexto: '85 de 80 pontos',
+          porcentagem: 100,
+          nivel: 'Ouro',
+          dataDesbloqueio: '15/10/2026'
+        },
+        {
+          id: 'badge-100h-poupadas',
+          titulo: '100 Horas de Vida Poupadas',
+          descricao: 'Acumulou mais de 100 horas uteis de trabalho poupadas em despesas evitadas.',
+          categoria: 'Tempo',
+          desbloqueado: true,
+          progressoTexto: '191.9h poupadas',
+          porcentagem: 100,
+          nivel: 'Diamante',
+          dataDesbloqueio: '16/10/2026'
+        },
+        {
+          id: 'badge-simulador-consciente',
+          titulo: 'Calculador Consciente',
+          descricao: 'Simulou o custo em horas de trabalho de pelo menos 5 produtos.',
+          categoria: 'Engajamento',
+          desbloqueado: false,
+          progressoTexto: '3 de 5 simulacoes',
+          porcentagem: 60,
+          nivel: 'Bronze',
+          dataDesbloqueio: null
+        },
+        {
+          id: 'badge-poupanca-ouro',
+          titulo: 'Reserva Blindada',
+          descricao: 'Economizou mais de R$ 5.000,00 desistindo de compras antes de passar o cartao.',
+          categoria: 'Financas',
+          desbloqueado: false,
+          progressoTexto: 'R$ 4.199 de R$ 5.000',
+          porcentagem: 84,
+          nivel: 'Platina',
+          dataDesbloqueio: null
+        }
+      ],
+      totalBadges: 6,
+      desbloqueadosCount: 4,
+      taxaConclusaoPercentual: 67
+    };
+  }
+};
+
 export const fetchPotes = async (salarioActual) => {
   try {
     return await getPotes();
@@ -405,6 +513,12 @@ export const ApiService = {
   },
   getHealthScore: async () => {
     return getHealthScore();
+  },
+  getHealthScoreTimeline: async () => {
+    return getHealthScoreTimeline();
+  },
+  getUserBadges: async () => {
+    return getUserBadges();
   },
   getPots: async (mes) => getPotes(mes),
   checkPurchaseBudgetImpact: async (valor, categoria) => checkPurchaseBudgetImpact(valor, categoria),

@@ -261,3 +261,131 @@ describe("cooldownModel.registrarDesfecho / getAuditoria", () => {
     expect(cooldownModel.getResumo(ctx).economiaTotal).toBe(240);
   });
 });
+
+describe("cooldownModel.sugerirPeriodo", () => {
+  it("sugere 48h para item cotidiano", () => {
+    expect(cooldownModel.sugerirPeriodo(100, PERFIL).chave).toBe("curto");
+  });
+
+  it("sugere 7 dias acima de 10% do salário", () => {
+    const sugestao = cooldownModel.sugerirPeriodo(500, PERFIL);
+
+    expect(sugestao.chave).toBe("intermediario");
+    expect(sugestao.horas).toBe(168);
+    expect(sugestao.percentualRenda).toBeCloseTo(14.29, 1);
+  });
+
+  it("aplica a Regra dos 30 Dias só quando supera 40% do salário", () => {
+    expect(cooldownModel.sugerirPeriodo(1400, PERFIL).chave).toBe("intermediario"); // exatos 40%
+    expect(cooldownModel.sugerirPeriodo(1401, PERFIL).chave).toBe("estendido");
+    expect(cooldownModel.sugerirPeriodo(1401, PERFIL).horas).toBe(720);
+  });
+
+  it("fica nas 48h quando o perfil não tem salário", () => {
+    const sugestao = cooldownModel.sugerirPeriodo(10000, {});
+
+    expect(sugestao.chave).toBe("curto");
+    expect(sugestao.percentualRenda).toBeNull();
+  });
+
+  it("identifica período mais curto que o sugerido", () => {
+    expect(cooldownModel.periodoMaisCurto("curto", "estendido")).toBe(true);
+    expect(cooldownModel.periodoMaisCurto("estendido", "intermediario")).toBe(false);
+    expect(cooldownModel.periodoMaisCurto("curto", "curto")).toBe(false);
+  });
+});
+
+describe("cooldownModel - quarentena estendida", () => {
+  it("escala fases e marcos para os 30 dias", () => {
+    const tempo = cooldownModel.calcularFaseTemporal(horasAntes(200), AGORA, 720);
+
+    expect(tempo.marcos.map((m) => m.horas)).toEqual([180, 360, 720]);
+    expect(tempo.marcos.map((m) => m.rotulo)).toEqual(["7,5d", "15d", "30d"]);
+    expect(tempo.fase.chave).toBe("analise");
+    expect(tempo.horasRestantes).toBe(520);
+    expect(tempo.periodoCooldownHoras).toBe(720);
+  });
+
+  it("adiciona o desejo com o período escolhido e separa no resumo", () => {
+    const novo = cooldownModel.addItem(
+      { item: "Notebook", preco: 5000, categoria: "eletronicos", periodo: "estendido" },
+      ctx
+    );
+
+    expect(novo.periodo).toEqual({ chave: "estendido", horas: 720, rotulo: "30 dias" });
+    expect(novo.tempo.horasRestantes).toBe(720);
+    expect(novo.status).toBe("em_espera");
+    expect(cooldownModel.getResumo(ctx).porPeriodo).toEqual({
+      estendido: 1,
+      intermediario: 0,
+      curto: 3,
+    });
+  });
+
+  it("item de 30 dias segue em espera depois de 48h", () => {
+    cooldownModel._resetForTests([
+      { id: 1, item: "TV", preco: 4000, criadoEm: horasAntes(50), periodo: "estendido" },
+    ]);
+
+    expect(cooldownModel.getItemById(1, ctx).status).toBe("em_espera");
+  });
+
+  it("período inválido cai na quarentena padrão de 48h", () => {
+    const novo = cooldownModel.addItem({ item: "X", preco: 10, periodo: "eterno" }, ctx);
+    expect(novo.periodo.chave).toBe("curto");
+  });
+
+  it("registra o período no histórico de desfecho", () => {
+    cooldownModel.registrarDesfecho(3, "desistiu", ctx);
+    expect(cooldownModel.getAuditoria().registros[0].periodo.chave).toBe("curto");
+  });
+});
+
+describe("cooldownModel.calcularStreakDisciplina", () => {
+  const INICIO = horasAntes(20 * 24);
+
+  beforeEach(() => {
+    cooldownModel._resetForTests(SEED, { inicioDisciplina: INICIO });
+  });
+
+  it("conta os dias desde o início do monitoramento quando não há compra por impulso", () => {
+    const streak = cooldownModel.calcularStreakDisciplina({ agora: AGORA });
+
+    expect(streak.diasSeguidos).toBe(20);
+    expect(streak.recorde).toBe(20);
+    expect(streak.proximaMeta).toEqual({ dias: 30, faltam: 10 });
+    expect(streak.mensagem).toBe("Fogo da Disciplina: 20 dias seguidos sem compras por impulso");
+  });
+
+  it("compra antes do fim da quarentena zera a sequência e preserva o recorde", () => {
+    cooldownModel.registrarDesfecho(1, "comprou", ctx); // item 1 tem só 2h de quarentena
+    const streak = cooldownModel.calcularStreakDisciplina({ agora: AGORA });
+
+    expect(streak.diasSeguidos).toBe(0);
+    expect(streak.recorde).toBe(20);
+    expect(streak.totalComprasImpulsivas).toBe(1);
+    expect(streak.ultimaCompraImpulsiva.item).toBe("Fone caro");
+  });
+
+  it("compra depois da quarentena concluída não quebra a sequência", () => {
+    cooldownModel.registrarDesfecho(3, "comprou", ctx); // 50h de 48h: consciente
+    const streak = cooldownModel.calcularStreakDisciplina({ agora: AGORA });
+
+    expect(streak.diasSeguidos).toBe(20);
+    expect(streak.totalComprasImpulsivas).toBe(0);
+  });
+
+  it("volta a contar a partir da última compra por impulso", () => {
+    cooldownModel.registrarDesfecho(1, "comprou", ctx);
+    const depois = new Date(AGORA.getTime() + 3 * 24 * MS_POR_HORA + 1000);
+
+    expect(cooldownModel.calcularStreakDisciplina({ agora: depois }).diasSeguidos).toBe(3);
+  });
+
+  it("usa singular para 1 dia", () => {
+    const streak = cooldownModel.calcularStreakDisciplina({
+      agora: new Date(new Date(INICIO).getTime() + 25 * MS_POR_HORA),
+    });
+    expect(streak.mensagem).toContain("1 dia seguido sem");
+  });
+});

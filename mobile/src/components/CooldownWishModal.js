@@ -6,6 +6,9 @@
  * O mesmo formulário atende os dois modos:
  *   modo="novo" -> nome, preço, categoria + questionário
  *   modo="quiz" -> só o questionário, para um desejo que já está em quarentena
+ *
+ * Sprint 3: no modo "novo", o período de reflexão (48h / 7 dias / 30 dias) é
+ * sugerido conforme o preço digitado. Dá para alongar, nunca encurtar.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -22,6 +25,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
+import { sugerirPeriodo } from '../hooks/useCooldown';
 
 const CATEGORIA_ROTULOS = {
   eletronicos: 'Eletrônicos',
@@ -44,6 +48,7 @@ const ESTADO_INICIAL = {
   necessidadeReal: null,
   usoPrevisto: null,
   alternativas: '',
+  periodo: null, // null = seguir o sugerido
 };
 
 function paraNumero(texto) {
@@ -56,6 +61,8 @@ export default function CooldownWishModal({
   modo = 'novo',
   item = null,
   categorias = [],
+  periodos = [],
+  salario,
   valorHora,
   salvando = false,
   erro = null,
@@ -93,6 +100,18 @@ export default function CooldownWishModal({
 
   const opcoesCategoria = categorias.length > 0 ? categorias : Object.keys(CATEGORIA_ROTULOS);
 
+  // Seletor de período: do mais curto para o mais longo, travando os que
+  // ficam abaixo do sugerido para o valor digitado.
+  const periodoSugerido = sugerirPeriodo(precoNumero, salario, periodos);
+  const opcoesPeriodo = [...periodos].sort((a, b) => a.horas - b.horas);
+  const abaixoDoSugerido = (periodo) =>
+    Boolean(periodoSugerido) && periodo.horas < periodoSugerido.horas;
+  const escolhido = periodos.find((p) => p.chave === form.periodo);
+  const periodoEfetivo =
+    escolhido && !abaixoDoSugerido(escolhido) ? escolhido : periodoSugerido;
+  const percentualRenda =
+    Number(salario) > 0 && precoNumero > 0 ? ((precoNumero / Number(salario)) * 100).toFixed(1) : null;
+
   const montarQuiz = () => ({
     necessidadeReal: form.necessidadeReal,
     usoPrevisto: form.usoPrevisto,
@@ -125,6 +144,7 @@ export default function CooldownWishModal({
       preco: precoNumero,
       categoria: form.categoria,
       quiz: montarQuiz(),
+      periodo: periodoEfetivo?.chave,
     });
   };
 
@@ -150,7 +170,7 @@ export default function CooldownWishModal({
             <Text style={styles.subtitulo}>
               {somenteQuiz
                 ? `Suas respostas recalculam o risco de impulso de "${item?.item ?? ''}".`
-                : 'O item fica 48h em reflexão. Suas respostas entram no cálculo do risco de impulso.'}
+                : 'O prazo de reflexão cresce com o peso do item no seu salário. Suas respostas entram no cálculo do risco de impulso.'}
             </Text>
 
             {!somenteQuiz && (
@@ -197,6 +217,43 @@ export default function CooldownWishModal({
                     );
                   })}
                 </View>
+
+                {opcoesPeriodo.length > 0 && (
+                  <>
+                    <Text style={styles.label}>Período de reflexão</Text>
+                    <View style={styles.chips}>
+                      {opcoesPeriodo.map((periodo) => {
+                        const ativa = periodoEfetivo?.chave === periodo.chave;
+                        const travado = abaixoDoSugerido(periodo);
+                        const sugerido = periodoSugerido?.chave === periodo.chave;
+                        return (
+                          <TouchableOpacity
+                            key={periodo.chave}
+                            style={[
+                              styles.chip,
+                              ativa && styles.chipAtivo,
+                              travado && styles.chipTravado,
+                            ]}
+                            onPress={() => atualizar('periodo', periodo.chave)}
+                            disabled={travado}
+                          >
+                            <Text style={[styles.chipTexto, ativa && styles.chipTextoAtivo]}>
+                              {periodo.rotulo}
+                              {sugerido ? ' · sugerido' : ''}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                    {periodoSugerido && (
+                      <Text style={styles.dica}>
+                        {percentualRenda
+                          ? `${percentualRenda}% do seu salário líquido. ${periodoSugerido.descricao}: quarentena mínima de ${periodoSugerido.rotulo}.`
+                          : 'Digite o preço para sugerir o período de reflexão.'}
+                      </Text>
+                    )}
+                  </>
+                )}
               </>
             )}
 
@@ -268,7 +325,9 @@ export default function CooldownWishModal({
               <ActivityIndicator color={colors.textPrimary} />
             ) : (
               <Text style={styles.botaoSalvarTexto}>
-                {somenteQuiz ? 'Salvar respostas' : 'Colocar em quarentena de 48h'}
+                {somenteQuiz
+                  ? 'Salvar respostas'
+                  : `Colocar em quarentena de ${periodoEfetivo?.rotulo ?? '48 horas'}`}
               </Text>
             )}
           </TouchableOpacity>
@@ -366,6 +425,9 @@ const styles = StyleSheet.create({
   chipAtivo: {
     borderColor: colors.accent,
     backgroundColor: colors.accentStrong,
+  },
+  chipTravado: {
+    opacity: 0.35,
   },
   chipTexto: {
     color: colors.textSecondary,

@@ -1,6 +1,6 @@
 /**
  * CooldownSummaryCard - card de destaque no topo da tela, mostrando quanto
- * dinheiro (e quantas horas de trabalho) a trava de 48h está segurando neste
+ * dinheiro (e quantas horas de trabalho) a trava de reflexão está segurando neste
  * momento, quantos itens estão em risco crítico e o total já poupado.
  */
 
@@ -21,7 +21,7 @@ export default function CooldownSummaryCard({
 }) {
   return (
     <View style={styles.box}>
-      <Text style={styles.label}>Retido pela trava de 48h</Text>
+      <Text style={styles.label}>Retido pela trava de reflexão</Text>
       <Text style={styles.valor}>{formatarMoeda(valorRetido)}</Text>
       <Text style={styles.detalhe}>
         {totalEmEspera} {totalEmEspera === 1 ? 'desejo em espera' : 'desejos em espera'} ·{' '}

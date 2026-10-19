@@ -9,13 +9,16 @@
  * Sprint 2: consome o motor preditivo do back-end (score de impulso, fases
  * temporais e auditoria), com cronômetro ao vivo, modal de novo desejo e
  * modal de encerramento da quarentena.
+ *
+ * Sprint 3: card do Fogo da Disciplina no topo, período de reflexão
+ * proporcional (48h / 7 dias / 30 dias) e lista separada por período.
  */
 
 import React, { useState } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  SectionList,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
@@ -27,9 +30,29 @@ import CooldownSummaryCard from '../components/CooldownSummaryCard';
 import CooldownWishModal from '../components/CooldownWishModal';
 import CooldownOutcomeModal from '../components/CooldownOutcomeModal';
 import CooldownAuditPanel from '../components/CooldownAuditPanel';
+import DisciplineStreakCard from '../components/DisciplineStreakCard';
 import { colors } from '../theme/colors';
 
 const MODAL_FECHADO = { visible: false, modo: 'novo', item: null };
+
+const TITULOS_SECAO = {
+  estendido: 'Regra dos 30 dias · alto impacto',
+  intermediario: 'Quarentena de 7 dias',
+  curto: 'Quarentena de 48h · cotidiano',
+};
+
+/** Agrupa os desejos por período, do mais longo para o mais curto. */
+function agruparPorPeriodo(items, periodos) {
+  const ordem = periodos.length > 0 ? periodos.map((p) => p.chave) : Object.keys(TITULOS_SECAO);
+
+  return ordem
+    .map((chave) => ({
+      chave,
+      title: TITULOS_SECAO[chave] ?? chave,
+      data: items.filter((i) => (i.periodo?.chave ?? 'curto') === chave),
+    }))
+    .filter((secao) => secao.data.length > 0);
+}
 
 export default function CooldownView() {
   const {
@@ -37,6 +60,8 @@ export default function CooldownView() {
     resumo,
     auditoria,
     categorias,
+    periodos,
+    streak,
     perfil,
     loading,
     refreshing,
@@ -108,9 +133,12 @@ export default function CooldownView() {
 
   const cabecalho = (
     <View>
+      <DisciplineStreakCard streak={streak} />
+
       <Text style={styles.subtitulo}>
-        Todo desejo espera {resumo.periodoCooldownHoras}h antes de virar compra. Se o impulso
-        passar, o dinheiro fica.
+        Todo desejo espera antes de virar compra: 48h para o dia a dia, 7 dias para compras
+        intermediárias e 30 dias para o que passa de 40% do salário. Se o impulso passar, o
+        dinheiro fica.
       </Text>
 
       <CooldownSummaryCard
@@ -131,12 +159,19 @@ export default function CooldownView() {
 
   return (
     <View style={styles.container}>
-      <FlatList
-        data={items}
+      <SectionList
+        sections={agruparPorPeriodo(items, periodos)}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => (
           <CooldownCard item={item} onEncerrar={abrirEncerramento} onResponderQuiz={abrirQuiz} />
         )}
+        renderSectionHeader={({ section }) => (
+          <View style={[styles.secao, section.chave === 'estendido' && styles.secaoEstendida]}>
+            <Text style={styles.secaoTitulo}>{section.title}</Text>
+            <Text style={styles.secaoContagem}>{section.data.length}</Text>
+          </View>
+        )}
+        stickySectionHeadersEnabled={false}
         ListHeaderComponent={cabecalho}
         ListFooterComponent={<CooldownAuditPanel auditoria={auditoria} />}
         contentContainerStyle={{ paddingBottom: 24 }}
@@ -156,6 +191,8 @@ export default function CooldownView() {
         modo={modalDesejo.modo}
         item={modalDesejo.item}
         categorias={categorias}
+        periodos={periodos}
+        salario={perfil?.salario}
         valorHora={perfil?.valorHora}
         salvando={salvando}
         erro={erroAcao}
@@ -204,6 +241,31 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  secao: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 8,
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    backgroundColor: colors.surface,
+  },
+  secaoEstendida: {
+    borderLeftColor: colors.warning,
+  },
+  secaoTitulo: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  secaoContagem: {
+    color: colors.textSecondary,
+    fontSize: 12,
   },
   erro: {
     color: colors.danger,

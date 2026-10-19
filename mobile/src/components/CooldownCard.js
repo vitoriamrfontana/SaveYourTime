@@ -60,6 +60,10 @@ export default function CooldownCard({ item, onEncerrar, onResponderQuiz }) {
         </View>
       </View>
 
+      {item.periodo && (
+        <Text style={styles.periodo}>Quarentena de {item.periodo.rotulo}</Text>
+      )}
+
       <Text style={styles.preco}>{formatarMoeda(preco)}</Text>
       <Text style={styles.suor}>
         {item.horasSuor !== null ? `${item.horasSuor}h do seu trabalho` : 'Horas de trabalho indisponíveis'}
@@ -94,7 +98,7 @@ export default function CooldownCard({ item, onEncerrar, onResponderQuiz }) {
             style={[styles.marcoTexto, marco.atingido && styles.marcoAtingido]}
           >
             {marco.atingido ? '✓ ' : ''}
-            {marco.horas}h
+            {marco.rotulo ?? `${marco.horas}h`}
           </Text>
         ))}
       </View>
@@ -165,6 +169,14 @@ const styles = StyleSheet.create({
   badgeTexto: {
     fontSize: 11,
     fontWeight: 'bold',
+  },
+  periodo: {
+    color: colors.accent,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 4,
   },
   preco: {
     color: colors.textPrimary,

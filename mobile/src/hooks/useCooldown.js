@@ -6,6 +6,9 @@
  * temporais e auditoria de desfecho), mantém um "tique" de 1s para o
  * cronômetro regressivo e expõe as ações de escrita (novo desejo,
  * questionário reflexivo e encerramento da quarentena).
+ *
+ * Sprint 3: quarentenas proporcionais (48h / 7 dias / 30 dias) e o streak
+ * de disciplina (dias seguidos sem compra por impulso).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -27,7 +30,33 @@ const RESUMO_INICIAL = {
   horasPoupadas: 0,
   periodoCooldownHoras: 48,
   marcosHoras: [12, 24, 48],
+  porPeriodo: {},
 };
+
+const STREAK_INICIAL = {
+  diasSeguidos: 0,
+  recorde: 0,
+  totalComprasImpulsivas: 0,
+  ultimaCompraImpulsiva: null,
+  proximaMeta: null,
+  mensagem: '',
+};
+
+/**
+ * Mesma regra do back-end (cooldownModel.sugerirPeriodo), aplicada no cliente
+ * para o seletor reagir enquanto o usuário digita o preço. `periodos` vem da
+ * API ordenado do mais longo para o mais curto.
+ */
+export function sugerirPeriodo(preco, salario, periodos = []) {
+  const valor = Number(preco);
+  const renda = Number(salario);
+  const padrao = periodos.find((p) => p.percentualRendaAcimaDe === 0) ?? null;
+
+  if (!(valor > 0) || !(renda > 0)) return padrao;
+
+  const percentual = (valor / renda) * 100;
+  return periodos.find((p) => percentual > p.percentualRendaAcimaDe) ?? padrao;
+}
 
 const AUDITORIA_INICIAL = {
   registros: [],
@@ -45,11 +74,12 @@ const AUDITORIA_INICIAL = {
  * que o back-end mandou. Evita depender de novas requisições para o
  * cronômetro andar na tela.
  */
-function comTempoReal(item, agora, periodoCooldownHoras) {
+function comTempoReal(item, agora) {
   const liberaEm = new Date(item.liberaEm).getTime();
   const criadoEm = new Date(item.criadoEm).getTime();
   const msRestantes = Math.max(liberaEm - agora, 0);
-  const periodoMs = periodoCooldownHoras * MS_POR_HORA;
+  // Cada desejo tem o próprio período (48h, 7 dias ou 30 dias)
+  const periodoMs = (item.tempo?.periodoCooldownHoras ?? 48) * MS_POR_HORA;
 
   return {
     ...item,
@@ -66,6 +96,8 @@ export function useCooldown() {
   const [resumo, setResumo] = useState(RESUMO_INICIAL);
   const [auditoria, setAuditoria] = useState(AUDITORIA_INICIAL);
   const [categorias, setCategorias] = useState([]);
+  const [periodos, setPeriodos] = useState([]);
+  const [streak, setStreak] = useState(STREAK_INICIAL);
   const [perfil, setPerfil] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,10 +108,11 @@ export function useCooldown() {
   const fetchData = useCallback(async ({ silent = false } = {}) => {
     try {
       if (!silent) setError(null);
-      const [dados, dadosAuditoria, dadosPerfil] = await Promise.all([
+      const [dados, dadosAuditoria, dadosPerfil, dadosStreak] = await Promise.all([
         ApiService.getCooldownItems(),
         ApiService.getCooldownAudit(),
         ApiService.getUserProfile(),
+        ApiService.getDisciplineStreak(),
       ]);
 
       // Blinda contra payload fora do formato esperado (ex.: uma versão
@@ -87,6 +120,8 @@ export function useCooldown() {
       setItems(Array.isArray(dados?.items) ? dados.items : []);
       setResumo({ ...RESUMO_INICIAL, ...(dados?.resumo ?? {}) });
       setCategorias(Array.isArray(dados?.categorias) ? dados.categorias : []);
+      setPeriodos(Array.isArray(dados?.periodos) ? dados.periodos : []);
+      setStreak({ ...STREAK_INICIAL, ...(dadosStreak ?? {}) });
       setAuditoria({ ...AUDITORIA_INICIAL, ...(dadosAuditoria ?? {}) });
       setPerfil(dadosPerfil ?? null);
       setAgora(Date.now());
@@ -113,8 +148,8 @@ export function useCooldown() {
   }, [temContagemAtiva]);
 
   const itens = useMemo(
-    () => items.map((item) => comTempoReal(item, agora, resumo.periodoCooldownHoras)),
-    [items, agora, resumo.periodoCooldownHoras]
+    () => items.map((item) => comTempoReal(item, agora)),
+    [items, agora]
   );
 
   // Quando um cronômetro zera na tela, busca o estado real (status e resumo
@@ -159,10 +194,11 @@ export function useCooldown() {
     [fetchData]
   );
 
+  // Sempre pela rota estendida: o back-end valida o período mínimo pelo valor
   const adicionarDesejo = useCallback(
-    ({ item, preco, categoria, quiz }) =>
+    ({ item, preco, categoria, quiz, periodo }) =>
       executarAcao(() =>
-        ApiService.createCooldownItem({ item, preco: Number(preco), categoria, quiz })
+        ApiService.createExtendedCooldown({ item, preco: Number(preco), categoria, quiz, periodo })
       ),
     [executarAcao]
   );
@@ -188,6 +224,8 @@ export function useCooldown() {
     resumo,
     auditoria,
     categorias,
+    periodos,
+    streak,
     perfil,
     loading,
     refreshing,

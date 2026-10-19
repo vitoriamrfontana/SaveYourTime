@@ -42,6 +42,7 @@ export default function CooldownOutcomeModal({
   const desistiu = desfecho?.tipo === 'desistiu';
   const liberado = item.tempoReal?.liberado ?? item.tempo.concluido;
   const corRisco = NIVEL_CORES[item.risco.nivel] ?? colors.textSecondary;
+  const periodoRotulo = item.periodo?.rotulo ?? '48 horas';
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onFechar}>
@@ -65,7 +66,7 @@ export default function CooldownOutcomeModal({
                     {desfecho.horasPoupadas}h de trabalho que continuam sendo suas.
                   </Text>
                   <View style={styles.totalBox}>
-                    <Text style={styles.totalLabel}>Economia total da trava de 48h</Text>
+                    <Text style={styles.totalLabel}>Economia total da trava de reflexão</Text>
                     <Text style={styles.totalValor}>
                       {formatarMoeda(resultado?.resumo?.economiaTotal)}
                     </Text>
@@ -83,8 +84,8 @@ export default function CooldownOutcomeModal({
                   </Text>
                   <Text style={styles.detalheSecundario}>
                     {desfecho.concluiuCooldown
-                      ? 'Pelo menos foi uma decisão tomada depois das 48h de reflexão.'
-                      : `Decidida ainda na fase "${desfecho.faseNoDesfecho}", antes de completar as 48h.`}
+                      ? `Pelo menos foi uma decisão tomada depois dos ${periodoRotulo} de reflexão.`
+                      : `Decidida ainda na fase "${desfecho.faseNoDesfecho}", antes de completar ${periodoRotulo}. Conta como compra por impulso e reinicia o Fogo da Disciplina.`}
                   </Text>
                 </>
               )}
@@ -113,7 +114,8 @@ export default function CooldownOutcomeModal({
 
               {!liberado && (
                 <Text style={styles.aviso}>
-                  A reflexão de 48h ainda não terminou. Desistir agora já conta como economia.
+                  A reflexão de {periodoRotulo} ainda não terminou. Desistir agora já conta como
+                  economia; comprar agora reinicia o Fogo da Disciplina.
                 </Text>
               )}
 

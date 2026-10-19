@@ -66,6 +66,10 @@ export default function CooldownAuditPanel({ auditoria }) {
                   {desistiu ? 'Desisti' : 'Comprei'} em {formatarData(registro.registradoEm)} · risco{' '}
                   {registro.nivelNoDesfecho}
                 </Text>
+                <Text style={styles.detalhe}>
+                  Quarentena de {registro.periodo?.rotulo ?? '48 horas'}
+                  {!desistiu && !registro.concluiuCooldown ? ' · comprado por impulso' : ''}
+                </Text>
               </View>
               <Text style={[styles.valor, { color: desistiu ? colors.success : colors.danger }]}>
                 {desistiu ? '+' : '−'}

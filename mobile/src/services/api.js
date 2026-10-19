@@ -304,6 +304,16 @@ export const comprarDesejoCooldown = (id) =>
   request(`/cooldown/${id}/comprei`, { method: 'PATCH' });
 
 export const getAuditoriaCooldown = () => request('/cooldown/auditoria');
+
+// Sprint 3 - Quarentena Estendida: período proporcional (48h / 7 dias / 30 dias)
+export const createExtendedCooldown = (dados) =>
+  request('/cooldown/extended', {
+    method: 'POST',
+    body: JSON.stringify(dados),
+  });
+
+// Fogo da Disciplina: dias seguidos sem compra por impulso
+export const getDisciplineStreak = () => request('/cooldown/streak');
 export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
 
 export const checkPurchaseBudgetImpact = (valor, categoria) =>
@@ -471,6 +481,14 @@ export const ApiService = {
 
   getCooldownAudit: async () => {
     return getAuditoriaCooldown();
+  },
+
+  createExtendedCooldown: async (dados) => {
+    return createExtendedCooldown(dados);
+  },
+
+  getDisciplineStreak: async () => {
+    return getDisciplineStreak();
   },
 
   toggleSubscription: async (id) => {

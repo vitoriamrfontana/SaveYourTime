@@ -56,6 +56,13 @@ function validarQuiz(quiz) {
   }
 }
 
+function validarPeriodo(periodo) {
+  const chaves = cooldownModel.PERIODOS.map((p) => p.chave);
+  if (periodo !== undefined && !chaves.includes(periodo)) {
+    throw ApiError.badRequest(`O campo 'periodo' deve ser um destes: ${chaves.join(", ")}.`);
+  }
+}
+
 function validarId(id) {
   if (!id || isNaN(Number(id))) {
     throw ApiError.badRequest("O parâmetro 'id' deve ser numérico.");
@@ -72,6 +79,7 @@ const listItems = asyncHandler(async (req, res) => {
     resumo: cooldownModel.getResumo(ctx),
     categorias: cooldownModel.CATEGORIAS,
     marcos: cooldownModel.MARCOS,
+    periodos: cooldownModel.PERIODOS,
   });
 });
 
@@ -99,6 +107,44 @@ const createItem = asyncHandler(async (req, res) => {
   const novoItem = cooldownModel.addItem({ item, preco, categoria, quiz }, ctx);
 
   return apiResponse(res, 201, { item: novoItem, resumo: cooldownModel.getResumo(ctx) });
+});
+
+// POST /api/cooldown/extended
+// Quarentena proporcional: 48h, 7 dias ou 30 dias conforme o peso do item no
+// salário. Sem 'periodo' no corpo, aplica o sugerido; o usuário pode alongar
+// a reflexão, mas não encurtar abaixo do sugerido.
+const criarCooldownEstendido = asyncHandler(async (req, res) => {
+  const { item, preco, categoria, quiz, periodo } = req.body;
+  validarNovoDesejo({ item, preco, categoria });
+  validarPeriodo(periodo);
+  if (quiz !== undefined) validarQuiz(quiz);
+
+  const ctx = contexto();
+  const sugestao = cooldownModel.sugerirPeriodo(preco, ctx.perfil);
+  const periodoEscolhido = periodo ?? sugestao.chave;
+
+  if (cooldownModel.periodoMaisCurto(periodoEscolhido, sugestao.chave)) {
+    throw ApiError.badRequest(
+      `Para este valor a quarentena mínima é de ${sugestao.rotulo}. ${sugestao.motivo}`
+    );
+  }
+
+  const novoItem = cooldownModel.addItem(
+    { item, preco, categoria, quiz, periodo: periodoEscolhido },
+    ctx
+  );
+
+  return apiResponse(res, 201, {
+    item: novoItem,
+    sugestao,
+    resumo: cooldownModel.getResumo(ctx),
+  });
+});
+
+// GET /api/cooldown/streak
+// Fogo da Disciplina: dias seguidos sem compra por impulso
+const getStreakDisciplina = asyncHandler(async (req, res) => {
+  return apiResponse(res, 200, cooldownModel.calcularStreakDisciplina({ agora: new Date() }));
 });
 
 // PATCH /api/cooldown/:id/quiz
@@ -164,6 +210,8 @@ module.exports = {
   listItems,
   getItem,
   createItem,
+  criarCooldownEstendido,
+  getStreakDisciplina,
   responderQuiz,
   registrarDesistencia,
   registrarCompra,

@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +14,8 @@ import HoursImpactCard from '../components/HoursImpactCard';
 import CompoundGrowthPanel from '../components/CompoundGrowthPanel';
 import SubscriptionFilters from '../components/SubscriptionFilters';
 import AuditHistory from '../components/AuditHistory';
+import RedundancyAlertCard from '../components/RedundancyAlertCard';
+import UsageCheckModal from '../components/UsageCheckModal';
 import { colors } from '../theme/colors';
 
 export default function SubscriptionsView() {
@@ -33,7 +34,12 @@ export default function SubscriptionsView() {
     error,
     refresh,
     toggle,
+    redundancias,
+    checkUsage,
   } = useSubscriptions();
+
+  // Sprint 3: assinatura aberta no modal de custo por uso (null = modal fechado)
+  const [assinaturaEmAuditoria, setAssinaturaEmAuditoria] = useState(null);
 
   if (loading) {
     return (
@@ -53,6 +59,8 @@ export default function SubscriptionsView() {
   const cabecalho = (
     <View>
       {error && <Text style={styles.erro}>{error}</Text>}
+
+      <RedundancyAlertCard redundancias={redundancias} onPausar={toggle} />
 
       <HoursImpactCard horasTrabalho={insights?.horasTrabalho} />
 
@@ -91,6 +99,7 @@ export default function SubscriptionsView() {
             subscription={item}
             onToggle={toggle}
             custoEm5Anos={custoEm5AnosPorId[item.id]}
+            onVerificarUso={setAssinaturaEmAuditoria}
           />
         )}
         ListHeaderComponent={cabecalho}
@@ -106,6 +115,13 @@ export default function SubscriptionsView() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
         }
+      />
+
+      <UsageCheckModal
+        visible={assinaturaEmAuditoria !== null}
+        subscription={assinaturaEmAuditoria}
+        onFechar={() => setAssinaturaEmAuditoria(null)}
+        onCalcular={checkUsage}
       />
     </View>
   );

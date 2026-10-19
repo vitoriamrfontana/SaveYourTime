@@ -493,6 +493,18 @@ export const ApiService = {
   getSubscriptionAudit: async () => {
     return request('/subscriptions/auditoria');
   },
+  
+  // Sprint 3 - Detox: assinaturas concorrentes e custo por uso
+  getSubscriptionRedundancies: async () => {
+    return request('/subscriptions/redundancies');
+  },
+
+  checkSubscriptionUsage: async (id, frequenciaUso) => {
+    return request(`/subscriptions/${id}/usage-check`, {
+      method: 'POST',
+      body: JSON.stringify({ frequenciaUso }),
+    });
+  },
 
   searchDeals: async (query, valorHora) => {
     return searchDeals(query, valorHora);

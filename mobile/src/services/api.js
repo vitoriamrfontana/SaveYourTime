@@ -198,6 +198,12 @@ export const comprarDesejoCooldown = (id) =>
 export const getAuditoriaCooldown = () => request('/cooldown/auditoria');
 export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
 
+export const checkPurchaseBudgetImpact = (valor, categoria) =>
+  request('/pots/check-purchase', {
+    method: 'POST',
+    body: JSON.stringify({ valor: Number(String(valor).replace(',', '.')), categoria }),
+  });
+
 export const getLancamentosPotes = (mes, categoria) => {
   const params = [];
   if (mes) params.push(`mes=${encodeURIComponent(mes)}`);
@@ -401,6 +407,7 @@ export const ApiService = {
     return getHealthScore();
   },
   getPots: async (mes) => getPotes(mes),
+  checkPurchaseBudgetImpact: async (valor, categoria) => checkPurchaseBudgetImpact(valor, categoria),
   getPotTransactions: async (mes, categoria) => getLancamentosPotes(mes, categoria),
   createPotTransaction: async (lancamento) => criarLancamentoPote(lancamento),
   deletePotTransaction: async (id) => deletarLancamentoPote(id),

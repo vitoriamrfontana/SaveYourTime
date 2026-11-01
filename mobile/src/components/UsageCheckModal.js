@@ -7,6 +7,8 @@
  * O cálculo e os limites ficam no back-end; aqui é só formulário e exibição.
  *
  * Também exporta o CostBenefitBadge, o selo usado no SubscriptionCard.
+ *
+ * Sprint 4: fundo escuro vindo do tema e label no campo para o leitor de tela.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -22,16 +24,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
+import { formatarMoeda } from '../utils/format';
 
 const SELOS = {
   excelente: { label: 'Excelente', cor: colors.success },
   neutro: { label: 'Neutro', cor: colors.warning },
   prejuizo: { label: 'Prejuízo', cor: colors.danger },
 };
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
 
 export function CostBenefitBadge({ classificacao }) {
   const selo = SELOS[classificacao];
@@ -120,6 +119,7 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
             keyboardType="number-pad"
             maxLength={4}
             onSubmitEditing={calcular}
+            accessibilityLabel="Quantas vezes você usou no último mês"
           />
 
           {erro ? <Text style={styles.erro}>{erro}</Text> : null}
@@ -139,6 +139,7 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
             onPress={calcular}
             disabled={semValor || calculando}
             accessibilityRole="button"
+            accessibilityState={{ disabled: semValor || calculando }}
           >
             {calculando ? (
               <ActivityIndicator color={colors.textPrimary} />
@@ -157,7 +158,7 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
 const styles = StyleSheet.create({
   fundo: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: colors.overlay,
     justifyContent: 'flex-end',
   },
   painel: {

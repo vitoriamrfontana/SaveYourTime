@@ -491,36 +491,56 @@ export const ApiService = {
     return getDisciplineStreak();
   },
 
-  toggleSubscription: async (id) => {
-    return request(`/subscriptions/${id}/toggle`, {
-      method: 'PATCH',
-    });
-  },
-
-    createSubscription: async (nome, valorMensal, categoria) => {
+  // Sprint 4 - Detox: aceita um objeto com os campos novos (valorCobrado, ciclo,
+  // data de cobrança, divisão, teste grátis). A forma antiga
+  // (nome, valorMensal, categoria, tipo) continua valendo.
+  createSubscription: async (nomeOuDados, valorMensal, categoria, tipo) => {
+    const dados =
+      typeof nomeOuDados === 'object' && nomeOuDados !== null
+        ? nomeOuDados
+        : { nome: nomeOuDados, valorMensal, categoria, tipo };
     return request('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ nome, valorMensal, categoria }),
+      body: JSON.stringify(dados),
     });
   },
 
-  getSubscriptionInsights: async () => {
-    return request('/subscriptions/insights');
-  },
-
-  getSubscriptionAudit: async () => {
-    return request('/subscriptions/auditoria');
-  },
-  
-  // Sprint 3 - Detox: assinaturas concorrentes e custo por uso
-  getSubscriptionRedundancies: async () => {
-    return request('/subscriptions/redundancies');
-  },
-
+  // Sprint 3 - Detox: custo por uso
   checkSubscriptionUsage: async (id, frequenciaUso) => {
     return request(`/subscriptions/${id}/usage-check`, {
       method: 'POST',
       body: JSON.stringify({ frequenciaUso }),
+    });
+  },
+
+  // Sprint 4 - Detox: a tela inteira numa chamada (substitui insights, auditoria e
+  // redundâncias separados) e a taxonomia. Status, edição e exclusão devolvem
+  // { assinatura, resumo }, com o resumo já recalculado.
+  getSubscriptionOverview: async () => {
+    return request('/subscriptions/overview');
+  },
+
+  getSubscriptionMeta: async () => {
+    return request('/subscriptions/meta');
+  },
+
+  changeSubscriptionStatus: async (id, dados) => {
+    return request(`/subscriptions/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  updateSubscription: async (id, dados) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  deleteSubscription: async (id) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'DELETE',
     });
   },
 

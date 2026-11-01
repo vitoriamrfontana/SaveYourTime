@@ -1,17 +1,16 @@
+/**
+ * CompoundGrowthPanel - quanto a economia das canceladas renderia aplicada todo
+ * mês a 100% do CDI, ao lado de quanto as ativas vão custar no mesmo período.
+ *
+ * Sprint 4: aviso de que é uma estimativa educativa (sem IR, taxa de hoje).
+ */
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
+import { formatarMoeda, formatarNumero } from '../utils/format';
 
 const ALTURA_GRAFICO = 150;
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function formatarNumero(valor) {
-  return valor.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
-}
 
 function formatarPeriodo(meses) {
   const anos = meses / 12;
@@ -61,7 +60,7 @@ export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
         <>
           <Text style={styles.resumo}>
             Aplicando {formatarMoeda(economiaMensal)} por mês a 100% do CDI (
-            {formatarNumero(taxaAnualPercentual)}% ao ano), você teria{' '}
+            {formatarNumero(taxaAnualPercentual, 2)}% ao ano), você teria{' '}
             <Text style={styles.resumoDestaque}>{formatarMoeda(ultimoPeriodo.montante)}</Text> em{' '}
             {formatarPeriodo(ultimoPeriodo.meses)}, sendo {formatarMoeda(ultimoPeriodo.rendimento)}{' '}
             só de juros.
@@ -111,6 +110,12 @@ export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
           </View>
         ))}
       </View>
+
+      {/* Sprint 4 */}
+      <Text style={styles.aviso}>
+        Estimativa educativa, sem Imposto de Renda e com a taxa de hoje. Não é recomendação de
+        investimento.
+      </Text>
     </View>
   );
 }
@@ -234,5 +239,12 @@ const styles = StyleSheet.create({
   valorRendimento: {
     color: colors.success,
     fontWeight: '600',
+  },
+  // Sprint 4
+  aviso: {
+    color: colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 12,
   },
 });

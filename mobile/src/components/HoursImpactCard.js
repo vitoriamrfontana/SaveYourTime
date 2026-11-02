@@ -1,15 +1,12 @@
+/**
+ * HoursImpactCard - quantas horas de trabalho do mês vão só para pagar as
+ * assinaturas ativas (o valor-hora vem do Perfil, via /insights).
+ */
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function formatarNumero(valor) {
-  return valor.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
-}
+import { formatarMoeda, formatarNumero } from '../utils/format';
 
 export default function HoursImpactCard({ horasTrabalho }) {
   if (!horasTrabalho) return null;

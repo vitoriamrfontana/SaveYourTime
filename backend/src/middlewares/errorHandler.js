@@ -17,6 +17,15 @@ function errorHandler(err, req, res, next) {
     });
   }
 
+  // Sprint 4: JSON malformado no corpo (erro do express.json()) é erro do cliente.
+  // Antes caía no 500 abaixo, com stack trace no console.
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({
+      success: false,
+      error: { message: "O corpo da requisição não é um JSON válido." },
+    });
+  }
+
   console.error("[ERRO NÃO TRATADO]", err);
   return res.status(500).json({
     success: false,

@@ -3,6 +3,8 @@ const {
   validateUpdateSubscription,
   validateStatusChange,
   validateUpcomingQuery,
+  validateSettings,
+  validateCatalogQuery,
   validateIdParam,
   validateUsageCheck,
 } = require("../src/middlewares/validateSubscription");
@@ -189,5 +191,55 @@ describe("validateUpcomingQuery", () => {
 
   it.each(["0", "91", "abc", "1.5", "-3"])("recusa %p", (dias) => {
     expect(comDias(dias).statusCode).toBe(400);
+  });
+});
+
+describe("validateCreateSubscription (catálogo)", () => {
+  const criar = (body) => validar(validateCreateSubscription, { body });
+
+  it("aceita serviço que existe no catálogo", () => {
+    expect(criar({ nome: "Netflix", valorCobrado: 25.9, catalogoId: "netflix" })).toBeUndefined();
+  });
+
+  it("recusa serviço que não existe", () => {
+    expect(criar({ nome: "X", valorCobrado: 10, catalogoId: "nao-existe" }).message).toContain("catálogo");
+  });
+});
+
+describe("validateUsageCheck (resposta da pergunta)", () => {
+  const verificar = (body) => validar(validateUsageCheck, { body });
+
+  it.each([true, false])("aceita resposta %p", (resposta) => {
+    expect(verificar({ resposta })).toBeUndefined();
+  });
+
+  it.each([{ resposta: "sim" }, { resposta: 1 }, { resposta: true, frequenciaUso: -1 }, {}])("recusa %p", (body) => {
+    expect(verificar(body).statusCode).toBe(400);
+  });
+});
+
+describe("validateSettings", () => {
+  const configurar = (limitePercentualRenda) => validar(validateSettings, { body: { limitePercentualRenda } });
+
+  it.each([1, 5, 7.5, 50])("aceita %p", (valor) => {
+    expect(configurar(valor)).toBeUndefined();
+  });
+
+  it.each([0, 51, 2.55, "5", null, undefined])("recusa %p", (valor) => {
+    expect(configurar(valor).statusCode).toBe(400);
+  });
+});
+
+describe("validateCatalogQuery", () => {
+  const buscar = (q) => validar(validateCatalogQuery, { query: { q } });
+
+  it("aceita texto curto ou nenhum", () => {
+    expect(buscar("net")).toBeUndefined();
+    expect(buscar(undefined)).toBeUndefined();
+  });
+
+  it("recusa texto longo demais ou repetido", () => {
+    expect(buscar("a".repeat(61)).statusCode).toBe(400);
+    expect(buscar(["a", "b"]).statusCode).toBe(400);
   });
 });

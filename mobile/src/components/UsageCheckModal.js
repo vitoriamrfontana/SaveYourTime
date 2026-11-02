@@ -9,6 +9,9 @@
  * Também exporta o CostBenefitBadge, o selo usado no SubscriptionCard.
  *
  * Sprint 4: fundo escuro vindo do tema e label no campo para o leitor de tela.
+ * A comparação agora é por tipo (ex.: academia contra uma diária avulsa); nos
+ * tipos sem uso para contar (seguro, tarifa, cartão, nuvem), uma pergunta de sim
+ * ou não. Cada verificação vale 30 dias.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -24,7 +27,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { formatarMoeda } from '../utils/format';
+import { formatarData, formatarMoeda } from '../utils/format';
 
 const SELOS = {
   excelente: { label: 'Excelente', cor: colors.success },
@@ -44,7 +47,13 @@ export function CostBenefitBadge({ classificacao }) {
 }
 
 // "Você paga R$ 90,00/mês e usou 3 vezes = R$ 30,00 por uso."
-function fraseResultado({ valorMensal, frequenciaUso, custoPorUso }) {
+function fraseResultado({ forma, resposta, valorMensal, frequenciaUso, custoPorUso }) {
+  // Sprint 4: tipos com pergunta
+  if (forma === 'pergunta') {
+    return resposta
+      ? 'Você respondeu que sim: ela está sendo útil para você.'
+      : 'Você respondeu que não: talvez não compense continuar pagando.';
+  }
   if (custoPorUso === null) {
     return `Você paga ${formatarMoeda(valorMensal)}/mês e não usou nenhuma vez no último mês.`;
   }
@@ -52,7 +61,7 @@ function fraseResultado({ valorMensal, frequenciaUso, custoPorUso }) {
   return `Você paga ${formatarMoeda(valorMensal)}/mês e usou ${frequenciaUso} ${vezes} = ${formatarMoeda(custoPorUso)} por uso.`;
 }
 
-export default function UsageCheckModal({ visible, subscription, onFechar, onCalcular }) {
+export default function UsageCheckModal({ visible, subscription, verificacao, onFechar, onCalcular }) {
   const [texto, setTexto] = useState('');
   const [resultado, setResultado] = useState(null);
   const [calculando, setCalculando] = useState(false);
@@ -62,7 +71,7 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
   useEffect(() => {
     if (!visible || !subscription) return;
     const ultimo = subscription.usoMensal;
-    setTexto(ultimo ? String(ultimo.frequenciaUso) : '');
+    setTexto(ultimo?.forma === 'uso' ? String(ultimo.frequenciaUso) : '');
     setResultado(ultimo ? { ...ultimo, valorMensal: subscription.valorMensal } : null);
     setErro(null);
     setCalculando(false);
@@ -70,20 +79,26 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
 
   if (!subscription) return null;
 
+  const ehPergunta = verificacao?.forma === 'pergunta';
   const semValor = texto === '';
 
-  const calcular = async () => {
-    if (semValor || calculando) return;
+  // "entrada" é o número de usos ou { resposta }
+  const enviar = async (entrada) => {
+    if (calculando) return;
     setCalculando(true);
     setErro(null);
     try {
-      const novoResultado = await onCalcular(subscription.id, Number(texto));
+      const novoResultado = await onCalcular(subscription.id, entrada);
       setResultado(novoResultado);
     } catch (err) {
       setErro(err.message);
     } finally {
       setCalculando(false);
     }
+  };
+
+  const calcular = () => {
+    if (!semValor) enviar(Number(texto));
   };
 
   return (
@@ -94,7 +109,7 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
       >
         <View style={styles.painel}>
           <View style={styles.cabecalho}>
-            <Text style={styles.titulo}>Auditoria de uso</Text>
+            <Text style={styles.titulo}>{ehPergunta ? 'Vale a pena manter?' : 'Auditoria de uso'}</Text>
             <TouchableOpacity
               onPress={onFechar}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -109,18 +124,44 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
             {subscription.nome}: {formatarMoeda(subscription.valorMensal)} por mês.
           </Text>
 
-          <Text style={styles.label}>Quantas vezes você usou no último mês?</Text>
-          <TextInput
-            style={styles.input}
-            value={texto}
-            onChangeText={(valor) => setTexto(valor.replace(/\D/g, ''))}
-            placeholder="Ex.: 3"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="number-pad"
-            maxLength={4}
-            onSubmitEditing={calcular}
-            accessibilityLabel="Quantas vezes você usou no último mês"
-          />
+          {ehPergunta ? (
+            <>
+              <Text style={styles.label}>{verificacao.pergunta}</Text>
+              <View style={styles.respostas}>
+                {[
+                  { resposta: true, rotulo: 'Sim' },
+                  { resposta: false, rotulo: 'Não' },
+                ].map((opcao) => (
+                  <TouchableOpacity
+                    key={opcao.rotulo}
+                    style={[styles.botaoResposta, calculando && styles.botaoDesabilitado]}
+                    onPress={() => enviar({ resposta: opcao.resposta })}
+                    disabled={calculando}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.botaoTexto}>{opcao.rotulo}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Quantas vezes você usou no último mês?</Text>
+              <TextInput
+                style={styles.input}
+                value={texto}
+                onChangeText={(valor) => setTexto(valor.replace(/\D/g, ''))}
+                placeholder="Ex.: 3"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={4}
+                onSubmitEditing={calcular}
+                accessibilityLabel="Quantas vezes você usou no último mês"
+              />
+              {/* Sprint 4: com o que o custo por uso é comparado */}
+              {verificacao?.explicacao ? <Text style={styles.explicacao}>{verificacao.explicacao}</Text> : null}
+            </>
+          )}
 
           {erro ? <Text style={styles.erro}>{erro}</Text> : null}
 
@@ -131,24 +172,32 @@ export default function UsageCheckModal({ visible, subscription, onFechar, onCal
                 <Text style={styles.resultadoLabel}>Custo-benefício:</Text>
                 <CostBenefitBadge classificacao={resultado.classificacao} />
               </View>
+              {/* Sprint 4 */}
+              <Text style={styles.validade}>
+                {resultado.vencida
+                  ? 'Esta verificação venceu: confira de novo.'
+                  : `Vale até ${formatarData(resultado.validaAte)}.`}
+              </Text>
             </View>
           ) : null}
 
-          <TouchableOpacity
-            style={[styles.botao, (semValor || calculando) && styles.botaoDesabilitado]}
-            onPress={calcular}
-            disabled={semValor || calculando}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: semValor || calculando }}
-          >
-            {calculando ? (
-              <ActivityIndicator color={colors.textPrimary} />
-            ) : (
-              <Text style={styles.botaoTexto}>
-                {resultado ? 'Calcular de novo' : 'Calcular custo por uso'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          {!ehPergunta && (
+            <TouchableOpacity
+              style={[styles.botao, (semValor || calculando) && styles.botaoDesabilitado]}
+              onPress={calcular}
+              disabled={semValor || calculando}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: semValor || calculando }}
+            >
+              {calculando ? (
+                <ActivityIndicator color={colors.textPrimary} />
+              ) : (
+                <Text style={styles.botaoTexto}>
+                  {resultado ? 'Calcular de novo' : 'Calcular custo por uso'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -259,5 +308,28 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
+  },
+  // Sprint 4
+  explicacao: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 6,
+  },
+  respostas: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  botaoResposta: {
+    flex: 1,
+    backgroundColor: colors.accentStrong,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  validade: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 8,
   },
 });

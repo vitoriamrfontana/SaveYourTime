@@ -5,6 +5,8 @@ import {
   formatarData,
   formatarDataHora,
   formatarQuando,
+  formatarMesAno,
+  normalizarParaBusca,
   parseValorBR,
 } from '../src/utils/format';
 
@@ -57,6 +59,24 @@ describe('formatarQuando', () => {
     expect(formatarQuando(0, '2026-11-01')).toBe('hoje');
     expect(formatarQuando(1, '2026-11-02')).toBe('amanhã');
     expect(formatarQuando(5, '2026-11-06')).toBe('em 5 dias (06/11)');
+  });
+});
+
+describe('formatarMesAno', () => {
+  it('mostra o mês abreviado e o ano', () => {
+    expect(formatarMesAno('2026-11')).toBe('nov/2026');
+    expect(formatarMesAno('2027-01')).toBe('jan/2027');
+  });
+
+  it.each([null, '2026-11-01', 'abc'])('mostra traço para %p', (valor) => {
+    expect(formatarMesAno(valor)).toBe('—');
+  });
+});
+
+describe('normalizarParaBusca', () => {
+  it('ignora maiúsculas, acentos e espaços nas pontas', () => {
+    expect(normalizarParaBusca('  Música Ação ')).toBe('musica acao');
+    expect(normalizarParaBusca(null)).toBe('');
   });
 });
 

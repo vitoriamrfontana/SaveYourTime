@@ -47,6 +47,28 @@ export function formatarData(valor, { comAno = true } = {}) {
   });
 }
 
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+// "2026-11" -> "nov/2026" (mês em que um preço de referência foi conferido)
+export function formatarMesAno(valor) {
+  const partes = typeof valor === 'string' ? valor.match(/^(\d{4})-(\d{2})$/) : null;
+  if (!partes) return SEM_VALOR;
+  return `${MESES_CURTOS[Number(partes[2]) - 1]}/${partes[1]}`;
+}
+
+// Para buscar por nome sem ligar para maiúsculas e acentos ("Música" acha "musica")
+export function normalizarParaBusca(texto) {
+  return String(texto ?? '')
+    .toLowerCase()
+    .replace(/[áàâãä]/g, 'a')
+    .replace(/[éèêë]/g, 'e')
+    .replace(/[íìîï]/g, 'i')
+    .replace(/[óòôõö]/g, 'o')
+    .replace(/[úùûü]/g, 'u')
+    .replace(/ç/g, 'c')
+    .trim();
+}
+
 // A partir dos dias que faltam: "hoje", "amanhã" ou "em 3 dias (08/11)"
 export function formatarQuando(diasRestantes, data) {
   if (diasRestantes === 0) return 'hoje';

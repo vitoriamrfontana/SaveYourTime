@@ -4,8 +4,9 @@
  *
  * Sprint 4: se nada carregou (ex.: backend desligado), mostra o erro e um botão
  * "Tentar de novo". Cadastro e edição em formulário, próximas cobranças,
- * checklist de cobranças esquecidas, confirmação antes de cancelar ou pausar e
- * "Desfazer" logo depois.
+ * checklist de cobranças esquecidas, meta de gasto, Detox do mês, guia de
+ * cancelamento, confirmação antes de cancelar ou pausar e "Desfazer" logo depois.
+ * A confirmação usa um diálogo próprio porque o Alert do React Native não abre na web.
  */
 
 import React, { useState } from 'react';
@@ -17,9 +18,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
-import { useSubscriptions, TODAS_CATEGORIAS } from '../hooks/useSubscriptions';
+import { useSubscriptions } from '../hooks/useSubscriptions';
 import SubscriptionCard from '../components/SubscriptionCard';
 import EconomySummaryCard from '../components/EconomySummaryCard';
 import HoursImpactCard from '../components/HoursImpactCard';
@@ -32,6 +32,10 @@ import UpcomingChargesCard from '../components/UpcomingChargesCard';
 import SubscriptionFormModal from '../components/SubscriptionFormModal';
 import DetoxChecklist from '../components/DetoxChecklist';
 import UndoToast from '../components/UndoToast';
+import SpendingLimitCard from '../components/SpendingLimitCard';
+import MonthlyReviewModal from '../components/MonthlyReviewModal';
+import CancellationGuideModal from '../components/CancellationGuideModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { colors } from '../theme/colors';
 import { formatarData, formatarMoeda } from '../utils/format';
 
@@ -56,10 +60,16 @@ export default function SubscriptionsView() {
     dadosCarregados,
     tentarDeNovo,
     proximasCobrancas,
+    limite,
     meta,
+    statusFiltro,
+    setStatusFiltro,
+    busca,
+    setBusca,
     rotuloCategoria,
     descricaoTipo,
     fraseCiclo,
+    verificacaoDoTipo,
     cancelar,
     pausar,
     reativar,
@@ -68,6 +78,11 @@ export default function SubscriptionsView() {
     fecharDesfazer,
     salvar,
     excluir,
+    atualizarLimite,
+    buscarNoCatalogo,
+    carregarRevisao,
+    carregarGuia,
+    aplicarDecisoesDaRevisao,
   } = useSubscriptions();
 
   // Sprint 3: assinatura aberta no modal de custo por uso (null = modal fechado)
@@ -76,6 +91,10 @@ export default function SubscriptionsView() {
   // checklist, {} para cadastro em branco) ou null
   const [formulario, setFormulario] = useState(null);
   const [mostrarChecklist, setMostrarChecklist] = useState(false);
+  // Sprint 4: Detox do mês, guia de cancelamento e diálogo de confirmação abertos
+  const [mostrarRevisao, setMostrarRevisao] = useState(false);
+  const [assinaturaNoGuia, setAssinaturaNoGuia] = useState(null);
+  const [dialogo, setDialogo] = useState(null);
 
   if (loading) {
     return (
@@ -107,10 +126,14 @@ export default function SubscriptionsView() {
       assinatura.status === 'teste'
         ? `O teste grátis acaba em ${formatarData(assinatura.fimTeste)}. Cancelando agora, a primeira cobrança de ${formatarMoeda(assinatura.valorCobrado)} não acontece.`
         : `Você deixa de pagar ${formatarMoeda(assinatura.valorMensal)} por mês. Dá para desfazer logo depois.`;
-    Alert.alert(`Cancelar ${assinatura.nome}?`, mensagem, [
-      { text: 'Voltar', style: 'cancel' },
-      { text: 'Cancelar assinatura', style: 'destructive', onPress: () => cancelar(assinatura) },
-    ]);
+    setDialogo({
+      titulo: `Cancelar ${assinatura.nome}?`,
+      mensagem,
+      opcoes: [
+        { rotulo: 'Cancelar assinatura', tipo: 'destrutivo', onPress: () => cancelar(assinatura) },
+        { rotulo: 'Voltar', tipo: 'cancelar' },
+      ],
+    });
   };
 
   // Sprint 4: "Pausar" do alerta de concorrentes pausa de verdade, por 1 ou 3 meses
@@ -122,24 +145,33 @@ export default function SubscriptionsView() {
       alternar(assinatura);
       return;
     }
-    Alert.alert(
-      `Pausar ${assinatura.nome}?`,
-      'Durante a pausa ela sai dos seus gastos e volta sozinha no fim. Por quanto tempo?',
-      [
-        { text: 'Voltar', style: 'cancel' },
-        { text: '1 mês', onPress: () => pausar(assinatura, 1) },
-        { text: '3 meses', onPress: () => pausar(assinatura, 3) },
-      ]
-    );
+    setDialogo({
+      titulo: `Pausar ${assinatura.nome}?`,
+      mensagem: 'Durante a pausa ela sai dos seus gastos e volta sozinha no fim. Por quanto tempo?',
+      opcoes: [
+        { rotulo: '1 mês', onPress: () => pausar(assinatura, 1) },
+        { rotulo: '3 meses', onPress: () => pausar(assinatura, 3) },
+        { rotulo: 'Voltar', tipo: 'cancelar' },
+      ],
+    });
+  };
+
+  // Sprint 4: "Já cancelei" no guia marca a assinatura como cancelada (com Desfazer)
+  const marcarCancelada = (assinatura) => {
+    setAssinaturaNoGuia(null);
+    cancelar(assinatura);
   };
 
   const escolherDoChecklist = (item) => setFormulario({ sugestao: item });
 
-  // Custo invisível de 5 anos de cada assinatura ativa, indexado pelo id
+  // Sprint 4: quanto cada ativa custa em 5 anos (com reajuste) e o que o mesmo
+  // dinheiro viraria investido, indexado pelo id
   const custoEm5AnosPorId = {};
   (insights?.custoInvisivel?.itens ?? []).forEach((item) => {
     const projecao = item.projecoes.find((p) => p.meses === 60);
-    if (projecao) custoEm5AnosPorId[item.id] = projecao.valor;
+    if (projecao) {
+      custoEm5AnosPorId[item.id] = { comReajuste: projecao.comReajuste, seInvestido: projecao.seInvestido };
+    }
   });
 
   const cabecalho = (
@@ -151,6 +183,8 @@ export default function SubscriptionsView() {
       <RedundancyAlertCard redundancias={redundancias} onPausar={pedirPausa} descricaoTipo={descricaoTipo} />
 
       <HoursImpactCard horasTrabalho={insights?.horasTrabalho} />
+
+      <SpendingLimitCard limite={limite} onAlterarMeta={atualizarLimite} />
 
       <EconomySummaryCard
         economiaMensal={economia.economiaMensal}
@@ -178,6 +212,17 @@ export default function SubscriptionsView() {
         Cancele o que você não usa mais e veja o impacto no seu orçamento.
       </Text>
 
+      {/* Sprint 4: revisão guiada, uma assinatura por vez */}
+      {subscriptions.some((s) => s.ativo) && (
+        <TouchableOpacity
+          style={styles.botaoRevisao}
+          onPress={() => setMostrarRevisao(true)}
+          accessibilityRole="button"
+        >
+          <Text style={styles.botaoRevisaoTexto}>Fazer o Detox do mês</Text>
+        </TouchableOpacity>
+      )}
+
       {subscriptions.length > 0 && (
         <TouchableOpacity
           onPress={() => setMostrarChecklist((atual) => !atual)}
@@ -197,6 +242,11 @@ export default function SubscriptionsView() {
         categorias={categorias}
         categoriaFiltro={categoriaFiltro}
         onChangeCategoria={setCategoriaFiltro}
+        status={meta?.status ?? []}
+        statusFiltro={statusFiltro}
+        onChangeStatus={setStatusFiltro}
+        busca={busca}
+        onChangeBusca={setBusca}
         ordenacao={ordenacao}
         onChangeOrdenacao={setOrdenacao}
       />
@@ -215,7 +265,9 @@ export default function SubscriptionsView() {
             fraseCiclo={fraseCiclo(item.ciclo)}
             onToggle={alternar}
             onEditar={(assinatura) => setFormulario({ assinatura })}
+            onComoCancelar={setAssinaturaNoGuia}
             custoEm5Anos={custoEm5AnosPorId[item.id]}
+            podeVerificar={verificacaoDoTipo(item.tipo).forma !== 'nenhuma'}
             onVerificarUso={setAssinaturaEmAuditoria}
           />
         )}
@@ -227,9 +279,7 @@ export default function SubscriptionsView() {
             <DetoxChecklist itens={meta?.checklist} onEscolher={escolherDoChecklist} />
           ) : (
             <Text style={styles.vazio}>
-              {categoriaFiltro === TODAS_CATEGORIAS
-                ? 'Nenhuma assinatura cadastrada ainda.'
-                : 'Nenhuma assinatura nesta categoria. Escolha outra categoria acima.'}
+              Nenhuma assinatura com esses filtros. Mude a busca ou os filtros acima.
             </Text>
           )
         }
@@ -242,6 +292,7 @@ export default function SubscriptionsView() {
       <UsageCheckModal
         visible={assinaturaEmAuditoria !== null}
         subscription={assinaturaEmAuditoria}
+        verificacao={assinaturaEmAuditoria ? verificacaoDoTipo(assinaturaEmAuditoria.tipo) : null}
         onFechar={() => setAssinaturaEmAuditoria(null)}
         onCalcular={checkUsage}
       />
@@ -254,7 +305,25 @@ export default function SubscriptionsView() {
         onFechar={() => setFormulario(null)}
         onSalvar={salvar}
         onExcluir={excluir}
+        buscarNoCatalogo={buscarNoCatalogo}
       />
+
+      <MonthlyReviewModal
+        visible={mostrarRevisao}
+        onFechar={() => setMostrarRevisao(false)}
+        carregarRevisao={carregarRevisao}
+        onVerificarUso={checkUsage}
+        onAplicar={aplicarDecisoesDaRevisao}
+      />
+
+      <CancellationGuideModal
+        assinatura={assinaturaNoGuia}
+        carregarGuia={carregarGuia}
+        onMarcarCancelada={marcarCancelada}
+        onFechar={() => setAssinaturaNoGuia(null)}
+      />
+
+      <ConfirmDialog dialogo={dialogo} onFechar={() => setDialogo(null)} />
 
       <UndoToast aviso={desfazer} onDesfazer={desfazerUltima} onFechar={fecharDesfazer} />
     </View>
@@ -334,6 +403,19 @@ const styles = StyleSheet.create({
   botaoAdicionarTexto: {
     color: colors.textPrimary,
     fontSize: 13,
+    fontWeight: '600',
+  },
+  botaoRevisao: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  botaoRevisaoTexto: {
+    color: colors.accent,
+    fontSize: 14,
     fontWeight: '600',
   },
   link: {

@@ -8,7 +8,9 @@ const {
   VALOR_MENSAL_MAXIMO,
   NOME_MAXIMO,
   COMPARTILHADA_COM_MAXIMO,
+  LIMITE_PERCENTUAL_RENDA_MAXIMO,
 } = require("../models/subscriptionsModel");
+const { servicoPorId } = require("../models/subscriptionsCatalog");
 
 // Sprint 4: pausa e teste grátis podem ir no máximo até um ano à frente
 const DIAS_MAXIMOS_A_FRENTE = 366;
@@ -132,6 +134,12 @@ function erroCategoriaETipo(categoria, tipo) {
   return `${problema} Tipos válidos: ${tiposAceitos.join(", ") || "nenhum"}.`;
 }
 
+// Sprint 4: serviço escolhido no autocomplete precisa existir no catálogo
+function erroCatalogo(catalogoId) {
+  if (catalogoId == null || servicoPorId(catalogoId)) return null;
+  return "O 'catalogoId' informado não existe no catálogo.";
+}
+
 // Sprint 4: o cadastro nasce ativo ou em teste grátis (com a data em que o teste acaba)
 function erroStatusInicial(status, fimTeste) {
   if (status == null || status === "ativa") return null;
@@ -161,6 +169,7 @@ function validateCreateSubscription(req, res, next) {
       erroCalendario(body.ciclo, body.diaCobranca, body.proximaCobranca) ||
       erroInteiro("compartilhadaCom", body.compartilhadaCom, 0, COMPARTILHADA_COM_MAXIMO) ||
       erroCategoriaETipo(body.categoria, body.tipo) ||
+      erroCatalogo(body.catalogoId) ||
       erroStatusInicial(body.status, body.fimTeste)
   );
 }
@@ -250,11 +259,52 @@ function validateIdParam(req, res, next) {
 }
 
 /**
+ * validateSettings - Sprint 4: valida o PATCH /api/subscriptions/settings
+ * (meta de gasto com assinaturas, em % da renda).
+ */
+function validateSettings(req, res, next) {
+  const { limitePercentualRenda } = req.body;
+  const valor = typeof limitePercentualRenda === "number" ? limitePercentualRenda : NaN;
+
+  if (
+    !Number.isFinite(valor) ||
+    valor < 1 ||
+    valor > LIMITE_PERCENTUAL_RENDA_MAXIMO ||
+    Math.abs(valor * 10 - Math.round(valor * 10)) > 1e-9
+  ) {
+    return next(
+      ApiError.badRequest(
+        `O campo 'limitePercentualRenda' deve ser um número entre 1 e ${LIMITE_PERCENTUAL_RENDA_MAXIMO}, com até 1 casa decimal.`
+      )
+    );
+  }
+  next();
+}
+
+/**
+ * validateCatalogQuery - Sprint 4: valida o ?q= de GET /api/subscriptions/catalog.
+ */
+function validateCatalogQuery(req, res, next) {
+  const { q } = req.query;
+  if (q !== undefined && (typeof q !== "string" || q.length > NOME_MAXIMO)) {
+    return next(ApiError.badRequest(`O parâmetro 'q' deve ser um texto de até ${NOME_MAXIMO} caracteres.`));
+  }
+  next();
+}
+
+/**
  * validateUsageCheck - valida o payload de POST /api/subscriptions/:id/usage-check.
  * frequenciaUso = quantas vezes a pessoa usou o serviço no último mês.
+ * Sprint 4: nos tipos sem "uso" contável (seguro, tarifa, cartão, nuvem) vem a
+ * resposta da pergunta (true ou false). Qual dos dois o tipo pede, o model decide.
  */
 function validateUsageCheck(req, res, next) {
-  const { frequenciaUso } = req.body;
+  const { frequenciaUso, resposta } = req.body;
+
+  if (resposta !== undefined && typeof resposta !== "boolean") {
+    return next(ApiError.badRequest("O campo 'resposta' deve ser true ou false."));
+  }
+  if (frequenciaUso === undefined && resposta !== undefined) return next();
 
   if (
     frequenciaUso === undefined ||
@@ -262,7 +312,9 @@ function validateUsageCheck(req, res, next) {
     typeof frequenciaUso === "boolean" ||
     String(frequenciaUso).trim() === ""
   ) {
-    return next(ApiError.badRequest("O campo 'frequenciaUso' é obrigatório."));
+    return next(
+      ApiError.badRequest("O campo 'frequenciaUso' é obrigatório (ou 'resposta', nos tipos que têm pergunta).")
+    );
   }
 
   const usos = Number(frequenciaUso);
@@ -280,6 +332,8 @@ module.exports = {
   validateUpdateSubscription,
   validateStatusChange,
   validateUpcomingQuery,
+  validateSettings,
+  validateCatalogQuery,
   validateIdParam,
   validateUsageCheck,
 };

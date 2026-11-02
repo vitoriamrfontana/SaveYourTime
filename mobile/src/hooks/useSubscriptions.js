@@ -7,23 +7,28 @@
  * Sprint 4: a tela carrega numa chamada só (/overview), e mudar status, editar
  * ou excluir já devolve o resumo recalculado. Cancelar e pausar podem ser
  * desfeitos, os erros têm mensagem amigável, e dados e filtros sobrevivem à
- * troca de aba.
+ * troca de aba. Também: busca, filtro por status, meta de gasto, autocomplete do
+ * catálogo, Detox do mês e guia de cancelamento.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiService } from '../services/api';
 import { adicionarMeses, hojeLocal } from '../utils/datas';
 import { formatarData } from '../utils/format';
+import {
+  filtrarEOrdenar,
+  ORDENACOES,
+  TODAS_CATEGORIAS,
+  TODOS_STATUS,
+} from '../utils/listaAssinaturas';
+import { DECISOES } from '../utils/revisaoDoMes';
 
-export const TODAS_CATEGORIAS = 'todas';
-
-export const ORDENACOES = {
-  PADRAO: 'padrao',
-  MAIOR_VALOR: 'maior',
-  MENOR_VALOR: 'menor',
-};
+export { ORDENACOES, TODAS_CATEGORIAS, TODOS_STATUS };
 
 const ECONOMIA_ZERADA = { economiaMensal: 0, economiaAnual: 0, economiaAcumulada: 0 };
+
+// Quanto tempo dura a pausa escolhida no Detox do mês
+const MESES_DE_PAUSA_NA_REVISAO = 1;
 
 // Sprint 4: o App.js desmonta a tela ao trocar de aba. Guardando aqui, fora do
 // componente, o último resumo e os filtros aparecem na hora quando ela volta.
@@ -31,6 +36,8 @@ const cache = {
   resumo: null,
   meta: null,
   categoriaFiltro: TODAS_CATEGORIAS,
+  statusFiltro: TODOS_STATUS,
+  busca: '',
   ordenacao: ORDENACOES.PADRAO,
 };
 
@@ -77,6 +84,8 @@ export function useSubscriptions() {
   const [resumo, setResumo] = useState(cache.resumo);
   const [meta, setMeta] = useState(cache.meta);
   const [categoriaFiltro, setCategoriaFiltroAtual] = useState(cache.categoriaFiltro);
+  const [statusFiltro, setStatusFiltroAtual] = useState(cache.statusFiltro);
+  const [busca, setBuscaAtual] = useState(cache.busca);
   const [ordenacao, setOrdenacaoAtual] = useState(cache.ordenacao);
   const [loading, setLoading] = useState(cache.resumo === null);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,11 +228,12 @@ export function useSubscriptions() {
 
   // Sprint 3: calculadora de custo por uso. Devolve o resultado para o modal
   // e recarrega a tela, porque a sugestão de pausa pode mudar. Erros sobem para o modal.
+  // Sprint 4: "entrada" é o número de usos ou { resposta } nos tipos com pergunta.
   const checkUsage = useCallback(
-    async (id, frequenciaUso) => {
+    async (id, entrada) => {
       let resultado;
       try {
-        resultado = await ApiService.checkSubscriptionUsage(id, frequenciaUso);
+        resultado = await ApiService.checkSubscriptionUsage(id, entrada);
       } catch (err) {
         // Sprint 4: o modal mostra a mesma mensagem amigável da tela
         throw new Error(mensagemAmigavel(err));
@@ -234,10 +244,79 @@ export function useSubscriptions() {
     [fetchData]
   );
 
+  // Sprint 4: meta de gasto com assinaturas (% da renda); a resposta traz o resumo
+  const atualizarLimite = useCallback(
+    async (limitePercentualRenda) => {
+      const numero = novaRequisicao();
+      try {
+        const { resumo: novo } = await ApiService.updateSubscriptionSettings({ limitePercentualRenda });
+        if (numero === ultimaRequisicao) aplicarResumo(novo);
+        setError(null);
+      } catch (err) {
+        setError(mensagemAmigavel(err));
+      }
+    },
+    [aplicarResumo]
+  );
+
+  // Sprint 4: autocomplete do formulário. Falha na busca não atrapalha o cadastro.
+  const buscarNoCatalogo = useCallback(async (texto) => {
+    try {
+      return await ApiService.searchSubscriptionCatalog(texto);
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Sprint 4: Detox do mês e guia de cancelamento (os modais mostram o erro)
+  const carregarRevisao = useCallback(async () => {
+    try {
+      return await ApiService.getSubscriptionReview();
+    } catch (err) {
+      throw new Error(mensagemAmigavel(err));
+    }
+  }, []);
+
+  const carregarGuia = useCallback(async (id) => {
+    try {
+      return await ApiService.getSubscriptionCancelGuide(id);
+    } catch (err) {
+      throw new Error(mensagemAmigavel(err));
+    }
+  }, []);
+
+  // Sprint 4: aplica de uma vez o que foi decidido no Detox do mês. Devolve quantas
+  // mudanças falharam (a tela avisa e recarrega o que deu certo).
+  const aplicarDecisoesDaRevisao = useCallback(
+    async (decisoes) => {
+      let falhas = 0;
+      for (const [id, decisao] of Object.entries(decisoes)) {
+        if (decisao === DECISOES.MANTER) continue;
+        const dados =
+          decisao === DECISOES.PAUSAR
+            ? { status: 'pausada', pausadaAte: adicionarMeses(hojeLocal(), MESES_DE_PAUSA_NA_REVISAO) }
+            : { status: 'cancelada' };
+        if (!(await alterarStatus(Number(id), dados))) falhas += 1;
+      }
+      return falhas;
+    },
+    [alterarStatus]
+  );
+
   // Sprint 4: os filtros também ficam no cache, para voltarem com a aba
   const setCategoriaFiltro = useCallback((valor) => {
     cache.categoriaFiltro = valor;
     setCategoriaFiltroAtual(valor);
+  }, []);
+
+  const setStatusFiltro = useCallback((valor) => {
+    cache.statusFiltro = valor;
+    setStatusFiltroAtual(valor);
+  }, []);
+
+  const setBusca = useCallback((valor) => {
+    cache.busca = valor;
+    setBuscaAtual(valor);
   }, []);
 
   const setOrdenacao = useCallback((valor) => {
@@ -247,35 +326,33 @@ export function useSubscriptions() {
 
   const subscriptions = useMemo(() => resumo?.subscriptions ?? [], [resumo]);
 
-  // Lista já filtrada por categoria e ordenada por valor, pronta para a view
-  const subscriptionsVisiveis = useMemo(() => {
-    const filtradas =
-      categoriaFiltro === TODAS_CATEGORIAS
-        ? subscriptions
-        : subscriptions.filter((s) => s.categoria === categoriaFiltro);
+  // Lista já filtrada (categoria, status e nome) e ordenada, pronta para a view
+  const subscriptionsVisiveis = useMemo(
+    () => filtrarEOrdenar(subscriptions, { categoria: categoriaFiltro, status: statusFiltro, busca, ordenacao }),
+    [subscriptions, categoriaFiltro, statusFiltro, busca, ordenacao]
+  );
 
-    if (ordenacao === ORDENACOES.MAIOR_VALOR) {
-      return [...filtradas].sort((a, b) => b.valorMensal - a.valorMensal);
-    }
-    if (ordenacao === ORDENACOES.MENOR_VALOR) {
-      return [...filtradas].sort((a, b) => a.valorMensal - b.valorMensal);
-    }
-    return filtradas;
-  }, [subscriptions, categoriaFiltro, ordenacao]);
-
-  // Sprint 4: rótulos vindos da API (/meta); se ela falhar, mostra o valor cru
+  // Sprint 4: rótulos e formas de verificar vindos da API (/meta); se ela
+  // falhar, a tela mostra o valor cru
+  const tiposDaMeta = useMemo(() => meta?.categorias.flatMap((c) => c.tipos) ?? [], [meta]);
   const rotuloCategoria = useCallback(
     (valor) => meta?.categorias.find((c) => c.valor === valor)?.rotulo ?? valor,
     [meta]
   );
   const descricaoTipo = useCallback(
-    (valor) =>
-      meta?.categorias.flatMap((c) => c.tipos).find((t) => t.valor === valor)?.descricao ?? valor,
-    [meta]
+    (valor) => tiposDaMeta.find((t) => t.valor === valor)?.descricao ?? valor,
+    [tiposDaMeta]
   );
   const fraseCiclo = useCallback(
     (valor) => meta?.ciclos.find((c) => c.valor === valor)?.frase ?? valor,
     [meta]
+  );
+  const verificacaoDoTipo = useCallback(
+    (tipo) => {
+      if (tipo == null) return meta?.verificacaoSemTipo ?? { forma: 'uso' };
+      return tiposDaMeta.find((t) => t.valor === tipo)?.verificacao ?? { forma: 'uso' };
+    },
+    [meta, tiposDaMeta]
   );
 
   return {
@@ -300,10 +377,16 @@ export function useSubscriptions() {
     dadosCarregados: resumo !== null,
     tentarDeNovo,
     proximasCobrancas: resumo?.proximasCobrancas ?? null,
+    limite: resumo?.limite ?? null,
     meta,
+    statusFiltro,
+    setStatusFiltro,
+    busca,
+    setBusca,
     rotuloCategoria,
     descricaoTipo,
     fraseCiclo,
+    verificacaoDoTipo,
     cancelar,
     pausar,
     reativar,
@@ -312,5 +395,10 @@ export function useSubscriptions() {
     fecharDesfazer,
     salvar,
     excluir,
+    atualizarLimite,
+    buscarNoCatalogo,
+    carregarRevisao,
+    carregarGuia,
+    aplicarDecisoesDaRevisao,
   };
 }

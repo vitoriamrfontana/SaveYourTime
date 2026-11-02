@@ -24,6 +24,7 @@ export function camposIniciais(assinatura, sugestao) {
       pessoas: assinatura.compartilhadaCom,
       emTeste: false,
       fimTeste: '',
+      catalogoId: assinatura.catalogoId,
     };
   }
 
@@ -38,6 +39,20 @@ export function camposIniciais(assinatura, sugestao) {
     pessoas: 0,
     emTeste: false,
     fimTeste: '',
+    catalogoId: null,
+  };
+}
+
+// Sprint 4: escolher um serviço no autocomplete preenche nome, categoria e tipo; com
+// um plano (o sugerido, se nenhum for escolhido), também valor e ciclo, que seguem editáveis
+export function aplicarServico(campos, servico, plano = servico.planoSugerido) {
+  return {
+    ...campos,
+    nome: servico.nome,
+    categoria: servico.categoria,
+    tipo: servico.tipo,
+    catalogoId: servico.id,
+    ...(plano ? { valor: plano.valor.toFixed(2).replace('.', ','), ciclo: plano.ciclo } : {}),
   };
 }
 
@@ -75,6 +90,9 @@ export function validarFormulario(
     if (proxima) dados.proximaCobranca = proxima;
     else erros.proxima = 'Use o formato DD/MM/AAAA.';
   }
+
+  // Sprint 4: o serviço do catálogo só vai no cadastro (a edição não troca de serviço)
+  if (!editando && campos.catalogoId) dados.catalogoId = campos.catalogoId;
 
   // O teste grátis só se informa no cadastro
   if (!editando && campos.emTeste) {

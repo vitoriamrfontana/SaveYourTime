@@ -1,4 +1,4 @@
-import { camposIniciais, validarFormulario } from '../src/utils/formularioAssinatura';
+import { aplicarServico, camposIniciais, validarFormulario } from '../src/utils/formularioAssinatura';
 
 const HOJE = '2026-11-01';
 
@@ -33,6 +33,43 @@ describe('camposIniciais', () => {
       proxima: '20/11/2026',
       pessoas: 1,
     });
+  });
+});
+
+describe('aplicarServico', () => {
+  const NETFLIX = {
+    id: 'netflix',
+    nome: 'Netflix',
+    categoria: 'streaming',
+    tipo: 'video',
+    planoSugerido: { nome: 'Padrão', valor: 51.9, ciclo: 'mensal' },
+  };
+
+  it('preenche com o serviço e o plano sugerido', () => {
+    expect(aplicarServico(camposIniciais(null, null), NETFLIX)).toMatchObject({
+      nome: 'Netflix',
+      categoria: 'streaming',
+      tipo: 'video',
+      catalogoId: 'netflix',
+      valor: '51,90',
+      ciclo: 'mensal',
+    });
+  });
+
+  it('usa o plano escolhido', () => {
+    const anual = { nome: 'Anual', valor: 166.8, ciclo: 'anual' };
+    expect(aplicarServico(camposIniciais(null, null), NETFLIX, anual)).toMatchObject({ valor: '166,80', ciclo: 'anual' });
+  });
+
+  it('sem plano de referência, mantém o valor digitado', () => {
+    const semPreco = { ...NETFLIX, planoSugerido: null };
+    expect(aplicarServico({ ...camposIniciais(null, null), valor: '10,00' }, semPreco).valor).toBe('10,00');
+  });
+
+  it('o serviço vai no cadastro, mas não na edição', () => {
+    const campos = aplicarServico({ ...camposIniciais(null, null) }, NETFLIX);
+    expect(validarFormulario(campos, { hoje: '2026-11-01' }).dados.catalogoId).toBe('netflix');
+    expect(validarFormulario(campos, { editando: true, hoje: '2026-11-01' }).dados.catalogoId).toBeUndefined();
   });
 });
 

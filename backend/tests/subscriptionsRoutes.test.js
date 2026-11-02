@@ -1,7 +1,18 @@
 const request = require("supertest");
 const subscriptionsModel = require("../src/models/subscriptionsModel");
+const taxasService = require("../src/services/taxasService");
 const { hoje, adicionarDias } = require("../src/utils/datas");
 const criarAppDetox = require("./helpers/criarAppDetox");
+
+// Sprint 4: os testes nunca chamam a internet. Sem o Banco Central, o controller
+// usa as taxas de reserva (fonte "fallback").
+const fetchOriginal = global.fetch;
+beforeAll(() => {
+  global.fetch = jest.fn().mockRejectedValue(new Error("Sem internet nos testes"));
+});
+afterAll(() => {
+  global.fetch = fetchOriginal;
+});
 
 const app = criarAppDetox();
 
@@ -24,6 +35,7 @@ const SEED = [
 
 beforeEach(() => {
   subscriptionsModel._resetForTests(SEED);
+  taxasService._limparCache();
 });
 
 // Formato padrão de erro do errorHandler: { success: false, error: { message } }
@@ -178,6 +190,8 @@ describe("GET /api/subscriptions/overview", () => {
       "auditoria",
       "redundancias",
       "proximasCobrancas",
+      "limite",
+      "taxas",
     ]);
   });
 });
@@ -276,5 +290,73 @@ describe("POST /api/subscriptions (formato novo)", () => {
       await request(app).post("/api/subscriptions").send({ nome: "X", valorCobrado: 2400, ciclo: "semanal" }),
       400
     );
+  });
+});
+
+describe("GET /api/subscriptions/catalog", () => {
+  it("busca no catálogo", async () => {
+    const res = await request(app).get("/api/subscriptions/catalog?q=spot");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0]).toMatchObject({ id: "spotify", tipo: "musica" });
+  });
+
+  it("responde 400 para busca longa demais", async () => {
+    esperarErro(await request(app).get(`/api/subscriptions/catalog?q=${"a".repeat(61)}`), 400);
+  });
+});
+
+describe("GET /api/subscriptions/review", () => {
+  it("traz um cartão por assinatura ativa, com o valor-hora do Perfil", async () => {
+    const res = await request(app).get("/api/subscriptions/review");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.itens).toHaveLength(2); // a Academia está cancelada
+    expect(res.body.data.valorHora).toBe(21.88);
+  });
+});
+
+describe("GET e PATCH /api/subscriptions/settings", () => {
+  it("lê e muda a meta de gasto, e o resumo já vem com a meta nova", async () => {
+    expect((await request(app).get("/api/subscriptions/settings")).body.data).toEqual({ limitePercentualRenda: 5 });
+
+    const res = await request(app).patch("/api/subscriptions/settings").send({ limitePercentualRenda: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body.data.configuracoes).toEqual({ limitePercentualRenda: 3 });
+    expect(res.body.data.resumo.limite.limitePercentual).toBe(3);
+  });
+
+  it("responde 400 para meta inválida", async () => {
+    esperarErro(await request(app).patch("/api/subscriptions/settings").send({ limitePercentualRenda: 0 }), 400);
+  });
+});
+
+describe("GET /api/subscriptions/:id/cancel-guide", () => {
+  it("devolve o passo a passo e os direitos", async () => {
+    const res = await request(app).get("/api/subscriptions/1/cancel-guide");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.passos.length).toBeGreaterThan(0);
+    expect(res.body.data.direitos.length).toBeGreaterThan(0);
+  });
+
+  it("responde 404 para id inexistente", async () => {
+    esperarErro(await request(app).get("/api/subscriptions/999/cancel-guide"), 404);
+  });
+});
+
+describe("POST /api/subscriptions/:id/usage-check (forma do tipo)", () => {
+  it("responde 400 quando o tipo pede outra forma de verificação", async () => {
+    // Filmes A é vídeo: precisa de frequenciaUso, e não de resposta
+    esperarErro(await request(app).post("/api/subscriptions/1/usage-check").send({ resposta: true }), 400);
+  });
+});
+
+describe("taxas sem o Banco Central", () => {
+  it("o resumo usa as taxas de reserva e diz isso", async () => {
+    const res = await request(app).get("/api/subscriptions/overview");
+
+    expect(res.body.data.taxas).toMatchObject({ fonte: "fallback", atualizadoEm: "2026-10-29" });
+    expect(res.body.data.insights.projecaoJuros.fonteTaxa).toBe("fallback");
   });
 });

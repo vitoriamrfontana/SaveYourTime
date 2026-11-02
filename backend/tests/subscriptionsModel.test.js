@@ -298,7 +298,7 @@ describe("subscriptionsModel.detectarRedundancias", () => {
     expect(subscriptionsModel.detectarRedundancias().totalGrupos).toBe(0);
   });
 
-  it("a categoria 'outros' não tem tipos e nunca gera alerta", () => {
+  it("tipo de outra categoria em 'outros' vira null e não gera alerta", () => {
     subscriptionsModel._resetForTests([
       { id: 1, nome: "Clube do Livro", valorMensal: 30, ativo: true, categoria: "outros", tipo: "video" },
       { id: 2, nome: "Clube do Vinho", valorMensal: 90, ativo: true, categoria: "outros", tipo: "video" },
@@ -323,12 +323,14 @@ describe("subscriptionsModel.detectarRedundancias", () => {
   });
 });
 
+// Sem tipo, valem os limites gerais da Sprint 3 (R$ 5 e R$ 15 por uso); a
+// comparação por tipo está nos testes de verificarUso, mais abaixo
 describe("subscriptionsModel.calcularCustoUso", () => {
   const AGORA = new Date("2026-11-01T15:00:00.000Z");
 
   beforeEach(() => {
     subscriptionsModel._resetForTests([
-      { id: 1, nome: "Academia", valorMensal: 90, ativo: true, categoria: "saude", tipo: "academia" },
+      { id: 1, nome: "Clube", valorMensal: 90, ativo: true },
       { id: 2, nome: "Cancelada", valorMensal: 30, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
     ]);
   });
@@ -336,12 +338,15 @@ describe("subscriptionsModel.calcularCustoUso", () => {
   it("divide a mensalidade pelos usos do mês", () => {
     expect(subscriptionsModel.calcularCustoUso(1, 3, { agora: AGORA })).toEqual({
       id: 1,
-      nome: "Academia",
+      nome: "Clube",
       valorMensal: 90,
+      forma: "uso",
       frequenciaUso: 3,
       custoPorUso: 30,
+      referencia: null,
       classificacao: "prejuizo",
       verificadoEm: AGORA.toISOString(),
+      validaAte: "2026-12-01",
     });
   });
 
@@ -968,13 +973,29 @@ describe("subscriptionsModel.getMeta", () => {
       valor: "streaming",
       rotulo: "Streaming",
       tipos: [
-        { valor: "video", rotulo: "Vídeo", descricao: "streaming de vídeo" },
-        { valor: "musica", rotulo: "Música", descricao: "streaming de música" },
+        {
+          valor: "video",
+          rotulo: "Vídeo",
+          descricao: "streaming de vídeo",
+          verificacao: { forma: "uso", referencia: 15, explicacao: "Alugar um filme custa cerca de R$ 15." },
+        },
+        {
+          valor: "musica",
+          rotulo: "Música",
+          descricao: "streaming de música",
+          verificacao: { forma: "uso", referencia: 5, explicacao: expect.any(String) },
+        },
       ],
     });
     expect(meta.ciclos.find((c) => c.valor === "anual")).toEqual({ valor: "anual", rotulo: "Anual", frase: "por ano" });
     expect(meta.status.map((s) => s.valor)).toEqual(["ativa", "teste", "pausada", "cancelada"]);
-    expect(meta.limites).toEqual({ valorMensalMaximo: 10000, nomeMaximo: 60, compartilhadaComMaximo: 20 });
+    expect(meta.limites).toEqual({
+      valorMensalMaximo: 10000,
+      nomeMaximo: 60,
+      compartilhadaComMaximo: 20,
+      limitePercentualRendaMaximo: 50,
+    });
+    expect(meta.verificacaoSemTipo).toMatchObject({ forma: "uso", referencia: null });
   });
 
   it("todo item do checklist tem categoria e tipo que existem", () => {
@@ -983,5 +1004,335 @@ describe("subscriptionsModel.getMeta", () => {
       expect(tiposDaCategoria).toBeDefined();
       expect(item.tipo === null || tiposDaCategoria.includes(item.tipo)).toBe(true);
     });
+  });
+});
+
+// Sprint 4: custo por uso justo, eficiência, limite de gasto, revisão do mês,
+// guia de cancelamento, catálogo no cadastro e projeções com IR e reajuste
+
+describe("subscriptionsModel.verificarUso", () => {
+  const AGORA = new Date("2026-11-01T15:00:00.000Z");
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Academia", valorMensal: 90, ativo: true, categoria: "saude", tipo: "academia" },
+      { id: 2, nome: "Música", valorMensal: 30, ativo: true, categoria: "streaming", tipo: "musica" },
+      { id: 3, nome: "Seguro", valorMensal: 24.9, ativo: true, categoria: "financeiro", tipo: "seguro" },
+      { id: 4, nome: "Plano", valorMensal: 300, ativo: true, categoria: "saude", tipo: "plano_saude" },
+    ]);
+  });
+
+  it.each([
+    [6, 15, "excelente"], // metade da diária de academia (R$ 30) ou menos
+    [3, 30, "neutro"], // o mesmo que uma diária
+    [2, 45, "prejuizo"],
+  ])("academia: %i idas de R$ 90 = R$ %s por ida: %s", (usos, custo, classificacao) => {
+    expect(subscriptionsModel.verificarUso(1, { frequenciaUso: usos })).toMatchObject({
+      custoPorUso: custo,
+      referencia: 30,
+      classificacao,
+    });
+  });
+
+  it("R$ 15 por uso é ótimo na academia e ruim na música", () => {
+    expect(subscriptionsModel.verificarUso(1, { frequenciaUso: 6 }).classificacao).toBe("excelente");
+    expect(subscriptionsModel.verificarUso(2, { frequenciaUso: 2 }).classificacao).toBe("prejuizo");
+  });
+
+  it("seguro: responde a pergunta do tipo em vez de contar usos", () => {
+    expect(subscriptionsModel.verificarUso(3, { resposta: true }, { agora: AGORA })).toMatchObject({
+      forma: "pergunta",
+      pergunta: "Você acionou este seguro nos últimos 12 meses?",
+      resposta: true,
+      classificacao: "neutro",
+    });
+    expect(subscriptionsModel.verificarUso(3, { resposta: false }).classificacao).toBe("prejuizo");
+    expect(subscriptionsModel.verificarUso(3, { frequenciaUso: 3 }).erro).toContain("'resposta'");
+  });
+
+  it("tipo com uso exige frequenciaUso", () => {
+    expect(subscriptionsModel.verificarUso(1, { resposta: true }).erro).toContain("'frequenciaUso'");
+  });
+
+  it("plano de saúde não tem verificação de uso", () => {
+    expect(subscriptionsModel.verificarUso(4, { frequenciaUso: 1 }).erro).toContain("não mede custo por uso");
+  });
+
+  it("a verificação vale 30 dias e depois aparece como vencida", () => {
+    subscriptionsModel.verificarUso(1, { frequenciaUso: 3 }, { agora: AGORA });
+
+    expect(subscriptionsModel.getSubscriptions(em("2026-12-01"))[0].usoMensal).toMatchObject({
+      validaAte: "2026-12-01",
+      vencida: false,
+    });
+    expect(subscriptionsModel.getSubscriptions(em("2026-12-02"))[0].usoMensal.vencida).toBe(true);
+  });
+
+  it("guarda o histórico das 12 verificações mais recentes", () => {
+    for (let usos = 1; usos <= 14; usos += 1) subscriptionsModel.verificarUso(1, { frequenciaUso: usos });
+    const { historicoUso } = subscriptionsModel.getSubscriptions()[0];
+
+    expect(historicoUso).toHaveLength(12);
+    expect(historicoUso[0].frequenciaUso).toBe(3);
+    expect(historicoUso[11].frequenciaUso).toBe(14);
+  });
+
+  it("verificação vencida não decide mais a sugestão de pausa", () => {
+    subscriptionsModel._resetForTests(SEED_CONCORRENTES);
+    subscriptionsModel.verificarUso(2, { frequenciaUso: 0 }, em("2026-11-01"));
+
+    expect(subscriptionsModel.detectarRedundancias(em("2026-11-15")).grupos[0].sugestaoPausa.id).toBe(2);
+    expect(subscriptionsModel.detectarRedundancias(em("2026-12-15")).grupos[0].sugestaoPausa).toMatchObject({
+      id: 1,
+      motivo: "É a mais cara entre serviços que fazem a mesma coisa.",
+    });
+  });
+});
+
+describe("subscriptionsModel: score de eficiência e horas de trabalho", () => {
+  const PERFIL = { valorHora: 20, salario: 4000 };
+  const lista = (data = "2026-11-01") => subscriptionsModel.getSubscriptions({ perfil: PERFIL, ...em(data) });
+  const eficienciaDe = (id) => lista().find((s) => s.id === id).eficiencia;
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 40, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 2, nome: "Séries", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 3, nome: "Plano", valorMensal: 400, ativo: true, categoria: "saude", tipo: "plano_saude" },
+      { id: 4, nome: "Antiga", valorMensal: 10, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+  });
+
+  it("perde pontos por falta de verificação, concorrência e peso na renda", () => {
+    expect(eficienciaDe(1)).toEqual({
+      score: 62,
+      nivel: "atencao",
+      fatores: [
+        { fator: "sem_verificacao", pontos: -10, motivo: "Uso não verificado nos últimos 30 dias" },
+        { fator: "concorrente", pontos: -20, motivo: "Outro serviço ativo faz a mesma coisa" },
+        { fator: "renda", pontos: -8, motivo: "Consome 1,0% da sua renda" },
+      ],
+    });
+  });
+
+  it("custo-benefício excelente não perde pontos; prejuízo perde 40", () => {
+    subscriptionsModel.verificarUso(1, { frequenciaUso: 20 }, em("2026-11-01")); // R$ 2 por uso
+    subscriptionsModel.verificarUso(2, { frequenciaUso: 0 }, em("2026-11-01"));
+
+    expect(eficienciaDe(1)).toMatchObject({ score: 72, nivel: "bom" }); // -20 concorrente, -8 renda
+    expect(eficienciaDe(2)).toMatchObject({ score: 36, nivel: "ruim" }); // -40, -20, -4
+  });
+
+  it("plano de saúde não perde por falta de verificação, e o peso na renda tem teto de 20", () => {
+    expect(eficienciaDe(3)).toMatchObject({ score: 80, nivel: "bom" }); // 10% da renda daria 80 pontos
+  });
+
+  it("cancelada não tem score; as horas vêm do valor-hora do Perfil", () => {
+    expect(lista().find((s) => s.id === 4).eficiencia).toBeNull();
+    expect(lista().find((s) => s.id === 1).horasDeTrabalho).toBe(2); // R$ 40 / R$ 20 por hora
+  });
+
+  it("sem valor-hora nem salário no Perfil, não há horas nem ponto de renda", () => {
+    const [primeira] = subscriptionsModel.getSubscriptions({ perfil: { valorHora: 0, salario: 0 } });
+
+    expect(primeira.horasDeTrabalho).toBeNull();
+    expect(primeira.eficiencia.fatores.map((f) => f.fator)).not.toContain("renda");
+  });
+
+  it("sem Perfil, a lista não traz horas nem score", () => {
+    expect(subscriptionsModel.getSubscriptions()[0]).not.toHaveProperty("eficiencia");
+  });
+});
+
+describe("subscriptionsModel: limite de gasto com assinaturas", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "A", valorMensal: 100, ativo: true },
+      { id: 2, nome: "B", valorMensal: 50, ativo: true },
+    ]);
+  });
+
+  it("compara o gasto com a meta padrão de 5% da renda", () => {
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 4000 })).toEqual({
+      limitePercentual: 5,
+      gastoMensal: 150,
+      salario: 4000,
+      limiteMensal: 200,
+      percentualAtual: 3.75,
+      acimaDoLimite: false,
+    });
+  });
+
+  it("avisa quando passa da meta escolhida", () => {
+    subscriptionsModel.atualizarConfiguracoes({ limitePercentualRenda: 3 });
+
+    expect(subscriptionsModel.getConfiguracoes()).toEqual({ limitePercentualRenda: 3 });
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 4000 })).toMatchObject({
+      limiteMensal: 120,
+      acimaDoLimite: true,
+    });
+  });
+
+  it("sem salário no Perfil, os valores que dependem dele ficam nulos", () => {
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 0 })).toMatchObject({
+      percentualAtual: null,
+      limiteMensal: null,
+      acimaDoLimite: false,
+    });
+  });
+});
+
+describe("subscriptionsModel.getRevisaoDoMes", () => {
+  it("um cartão por assinatura ativa, da que mais pede atenção para a que menos pede", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 40, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 2, nome: "Séries", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 3, nome: "Academia", valorMensal: 90, ativo: true, categoria: "saude", tipo: "academia" },
+      { id: 4, nome: "Plano", valorMensal: 300, ativo: true, categoria: "saude", tipo: "plano_saude" },
+      { id: 5, nome: "Antiga", valorMensal: 10, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+    subscriptionsModel.verificarUso(3, { frequenciaUso: 1 }, em("2026-11-01")); // R$ 90 por ida: prejuízo
+    subscriptionsModel.addSubscription(
+      { nome: "Idiomas", valorCobrado: 30, tipo: "educacao", status: "teste", fimTeste: "2026-11-10" },
+      em("2026-11-01")
+    );
+
+    const revisao = subscriptionsModel.getRevisaoDoMes({ perfil: { valorHora: 20, salario: 4000 }, ...em("2026-11-02") });
+
+    expect(revisao).toMatchObject({ mes: "2026-11", valorHora: 20, gastoMensal: 450 });
+    expect(revisao.itens.map((i) => [i.assinatura.nome, i.sugestao])).toEqual([
+      ["Academia", "cancelar"],
+      ["Filmes", "pausar"],
+      ["Séries", "verificar"],
+      ["Plano", "manter"],
+      ["Idiomas", "decidir"],
+    ]);
+    expect(revisao.itens.find((i) => i.assinatura.nome === "Plano").verificacao).toEqual({ forma: "nenhuma" });
+  });
+
+  it("sem valor-hora no Perfil, a revisão vem sem ele", () => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "A", valorMensal: 10, ativo: true }]);
+    expect(subscriptionsModel.getRevisaoDoMes({ perfil: { valorHora: 0 } }).valorHora).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.getGuiaDeCancelamento", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Netflix", valorMensal: 51.9, ativo: true },
+      { id: 2, nome: "Tarifa do banco", valorMensal: 19.9, ativo: true, categoria: "financeiro", tipo: "conta_bancaria" },
+    ]);
+  });
+
+  it("serviço do catálogo traz o link oficial e só os direitos que valem para ele", () => {
+    const guia = subscriptionsModel.getGuiaDeCancelamento(1);
+
+    expect(guia).toMatchObject({
+      servico: { id: "netflix", nome: "Netflix" },
+      linkCancelamento: "https://help.netflix.com/pt/node/407",
+    });
+    expect(guia.direitos.map((d) => d.id)).toEqual(["arrependimento"]);
+    expect(guia.passos.length).toBeGreaterThan(0);
+    expect(guia.aviso).toContain("não é aconselhamento jurídico");
+  });
+
+  it("serviço regulado (banco) inclui o cancelamento com efeito imediato", () => {
+    const guia = subscriptionsModel.getGuiaDeCancelamento(2);
+
+    expect(guia).toMatchObject({ servico: null, linkCancelamento: null });
+    expect(guia.direitos.map((d) => d.baseLegal)).toEqual([
+      "Código de Defesa do Consumidor (Lei 8.078/1990), art. 49",
+      "Decreto 11.034/2022, art. 14",
+    ]);
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.getGuiaDeCancelamento(999)).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.addSubscription (catálogo)", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([]);
+  });
+
+  it("reconhece o serviço pelo nome e completa categoria e tipo", () => {
+    expect(subscriptionsModel.addSubscription({ nome: "Spotify Família", valorCobrado: 40.9 })).toMatchObject({
+      categoria: "streaming",
+      tipo: "musica",
+      catalogoId: "spotify",
+    });
+  });
+
+  it("usa o serviço escolhido no autocomplete", () => {
+    expect(
+      subscriptionsModel.addSubscription({ nome: "Streaming da casa", valorCobrado: 25.9, catalogoId: "netflix" })
+    ).toMatchObject({ categoria: "streaming", tipo: "video", catalogoId: "netflix" });
+  });
+
+  it("o que a pessoa escolheu vale mais do que o catálogo", () => {
+    expect(
+      subscriptionsModel.addSubscription({ nome: "Netflix", valorCobrado: 25.9, categoria: "outros", tipo: null })
+    ).toMatchObject({ categoria: "outros", tipo: null });
+  });
+});
+
+describe("subscriptionsModel: projeção com IR regressivo", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Cancelada", valorMensal: 100, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+  });
+
+  it("o líquido é o bruto menos o imposto", () => {
+    subscriptionsModel.calcularProjecaoJuros(0.12).periodos.forEach((p) => {
+      expect(p.impostoRenda).toBeGreaterThan(0);
+      expect(p.montanteLiquido).toBeCloseTo(p.montante - p.impostoRenda, 2);
+    });
+  });
+
+  it("a alíquota média cai com o tempo: entre 20% e 22,5% em 1 ano, perto de 15% em 5 anos", () => {
+    const [umAno, , cincoAnos] = subscriptionsModel.calcularProjecaoJuros(0.12).periodos;
+    const aliquotaMedia = (p) => p.impostoRenda / p.rendimento;
+
+    expect(aliquotaMedia(umAno)).toBeGreaterThan(0.2);
+    expect(aliquotaMedia(umAno)).toBeLessThan(0.225);
+    expect(aliquotaMedia(cincoAnos)).toBeGreaterThan(0.15);
+    expect(aliquotaMedia(cincoAnos)).toBeLessThan(0.17);
+  });
+
+  it("com taxa zero não há imposto", () => {
+    subscriptionsModel.calcularProjecaoJuros(0).periodos.forEach((p) => expect(p.impostoRenda).toBe(0));
+  });
+
+  it("informa a origem da taxa", () => {
+    expect(
+      subscriptionsModel.calcularProjecaoJuros(0.1365, { fonteTaxa: "bcb", taxaAtualizadaEm: "2026-10-29" })
+    ).toMatchObject({ fonteTaxa: "bcb", taxaAtualizadaEm: "2026-10-29", taxaAnualPercentual: 13.65 });
+  });
+});
+
+describe("subscriptionsModel: custo invisível com reajuste e custo de oportunidade", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "A", valorMensal: 100, ativo: true }]);
+  });
+
+  it("sem reajuste e sem juros, os três valores são iguais", () => {
+    const [umAno] = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0, taxaAnual: 0 }).totais;
+    expect(umAno).toEqual({ meses: 12, valor: 1200, comReajuste: 1200, seInvestido: 1200 });
+  });
+
+  it("reajusta o preço pelo IPCA a cada 12 meses", () => {
+    const custo = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0.1, taxaAnual: 0 });
+
+    expect(custo.reajusteAnualPercentual).toBe(10);
+    expect(custo.totais[1].comReajuste).toBe(3972); // 1.200 + 1.320 + 1.452
+  });
+
+  it("mostra quanto o mesmo dinheiro viraria aplicado, já sem o IR", () => {
+    const [umAno] = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0, taxaAnual: 0.12 }).totais;
+
+    expect(umAno.seInvestido).toBe(1251.36);
+    expect(umAno.seInvestido).toBeLessThan(1264.65); // o bruto, antes do IR
   });
 });

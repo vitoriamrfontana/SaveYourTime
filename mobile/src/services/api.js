@@ -505,11 +505,13 @@ export const ApiService = {
     });
   },
 
-  // Sprint 3 - Detox: custo por uso
-  checkSubscriptionUsage: async (id, frequenciaUso) => {
+  // Sprint 3 - Detox: custo por uso. Sprint 4: aceita também { resposta }, nos
+  // tipos que têm uma pergunta em vez de usos para contar
+  checkSubscriptionUsage: async (id, entrada) => {
+    const corpo = typeof entrada === 'object' && entrada !== null ? entrada : { frequenciaUso: entrada };
     return request(`/subscriptions/${id}/usage-check`, {
       method: 'POST',
-      body: JSON.stringify({ frequenciaUso }),
+      body: JSON.stringify(corpo),
     });
   },
 
@@ -541,6 +543,27 @@ export const ApiService = {
   deleteSubscription: async (id) => {
     return request(`/subscriptions/${id}`, {
       method: 'DELETE',
+    });
+  },
+
+  // Sprint 4 - Detox: catálogo (autocomplete), Detox do mês, guia de cancelamento
+  // e meta de gasto com assinaturas
+  searchSubscriptionCatalog: async (busca) => {
+    return request(`/subscriptions/catalog?q=${encodeURIComponent(busca)}`);
+  },
+
+  getSubscriptionReview: async () => {
+    return request('/subscriptions/review');
+  },
+
+  getSubscriptionCancelGuide: async (id) => {
+    return request(`/subscriptions/${id}/cancel-guide`);
+  },
+
+  updateSubscriptionSettings: async (dados) => {
+    return request('/subscriptions/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
     });
   },
 

@@ -2,13 +2,15 @@
  * CompoundGrowthPanel - quanto a economia das canceladas renderia aplicada todo
  * mês a 100% do CDI, ao lado de quanto as ativas vão custar no mesmo período.
  *
- * Sprint 4: aviso de que é uma estimativa educativa (sem IR, taxa de hoje).
+ * Sprint 4: aviso de que é uma estimativa educativa. Os valores já vêm sem o IR
+ * regressivo, o custo das ativas inclui o reajuste anual pelo IPCA, e a tela diz
+ * de quando é a taxa e se ela veio do Banco Central ou é a de reserva.
  */
 
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
-import { formatarMoeda, formatarNumero } from '../utils/format';
+import { formatarData, formatarMoeda, formatarNumero } from '../utils/format';
 
 const ALTURA_GRAFICO = 150;
 
@@ -40,16 +42,27 @@ function Grafico({ pontos }) {
   );
 }
 
+// Sprint 4: de onde veio a taxa usada na projeção
+function origemDaTaxa({ fonteTaxa, taxaAtualizadaEm }) {
+  const data = formatarData(taxaAtualizadaEm);
+  return fonteTaxa === 'bcb'
+    ? `Taxa de ${data}, do Banco Central.`
+    : `Taxa de referência de ${data}: o Banco Central não respondeu agora.`;
+}
+
 export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
   if (!projecaoJuros || !custoInvisivel) return null;
 
   const { economiaMensal, taxaAnualPercentual, periodos, curva } = projecaoJuros;
-  const pontos = curva.filter((p) => p.meses > 0);
+  // Sprint 4: o gráfico e o texto usam o valor já sem o IR
+  const pontos = curva
+    .filter((p) => p.meses > 0)
+    .map((p) => ({ meses: p.meses, montante: p.montanteLiquido, rendimento: p.montanteLiquido - p.totalAportado }));
   const ultimoPeriodo = periodos[periodos.length - 1];
 
   const custoPorPeriodo = {};
   custoInvisivel.totais.forEach((t) => {
-    custoPorPeriodo[t.meses] = t.valor;
+    custoPorPeriodo[t.meses] = t.comReajuste;
   });
 
   return (
@@ -61,16 +74,16 @@ export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
           <Text style={styles.resumo}>
             Aplicando {formatarMoeda(economiaMensal)} por mês a 100% do CDI (
             {formatarNumero(taxaAnualPercentual, 2)}% ao ano), você teria{' '}
-            <Text style={styles.resumoDestaque}>{formatarMoeda(ultimoPeriodo.montante)}</Text> em{' '}
-            {formatarPeriodo(ultimoPeriodo.meses)}, sendo {formatarMoeda(ultimoPeriodo.rendimento)}{' '}
-            só de juros.
+            <Text style={styles.resumoDestaque}>{formatarMoeda(ultimoPeriodo.montanteLiquido)}</Text> em{' '}
+            {formatarPeriodo(ultimoPeriodo.meses)}, já descontados {formatarMoeda(ultimoPeriodo.impostoRenda)} de
+            Imposto de Renda.
           </Text>
 
           <View
             accessible
-            accessibilityLabel={`Gráfico: o montante cresce até ${formatarMoeda(
-              ultimoPeriodo.montante
-            )} em ${ultimoPeriodo.meses} meses.`}
+            accessibilityLabel={`Gráfico: o valor guardado cresce até ${formatarMoeda(
+              ultimoPeriodo.montanteLiquido
+            )} em ${ultimoPeriodo.meses} meses, já sem o imposto.`}
           >
             <Grafico pontos={pontos} />
             <Text style={styles.eixoLegenda}>meses</Text>
@@ -83,7 +96,7 @@ export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
             </View>
             <View style={styles.legendaItem}>
               <View style={[styles.legendaCor, { backgroundColor: colors.success }]} />
-              <Text style={styles.legendaTexto}>Rendimento dos juros</Text>
+              <Text style={styles.legendaTexto}>Juros, já sem o IR</Text>
             </View>
           </View>
         </>
@@ -106,15 +119,16 @@ export default function CompoundGrowthPanel({ projecaoJuros, custoInvisivel }) {
             <Text style={[styles.celula, styles.valorCusto]}>
               {formatarMoeda(custoPorPeriodo[p.meses] ?? 0)}
             </Text>
-            <Text style={[styles.celula, styles.valorRendimento]}>{formatarMoeda(p.montante)}</Text>
+            <Text style={[styles.celula, styles.valorRendimento]}>{formatarMoeda(p.montanteLiquido)}</Text>
           </View>
         ))}
       </View>
 
       {/* Sprint 4 */}
       <Text style={styles.aviso}>
-        Estimativa educativa, sem Imposto de Renda e com a taxa de hoje. Não é recomendação de
-        investimento.
+        O custo das ativas considera reajuste anual de {formatarNumero(custoInvisivel.reajusteAnualPercentual, 2)}%
+        (IPCA dos últimos 12 meses). {origemDaTaxa(projecaoJuros)} Estimativa educativa, com IR regressivo e
+        sem IOF: não é recomendação de investimento.
       </Text>
     </View>
   );

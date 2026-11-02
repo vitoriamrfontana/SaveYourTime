@@ -8,7 +8,10 @@
  * ciclos de cobrança, plano dividido e próximas cobranças; status de verdade
  * (ativa, teste grátis, pausada e cancelada); edição com histórico de preços e
  * exclusão. Contas de dinheiro e de datas ficam em utils/ e a taxonomia em
- * subscriptionsTaxonomia.js.
+ * subscriptionsTaxonomia.js. Também na Sprint 4: custo por uso justo por tipo (com
+ * validade e histórico), score de eficiência, limite de gasto pela renda, revisão
+ * do mês, guia de cancelamento (catálogo em subscriptionsCatalog.js) e projeções
+ * com IR regressivo, reajuste pelo IPCA e custo de oportunidade.
  */
 
 const { arredondar, somar, multiplicar } = require("../utils/dinheiro");
@@ -27,6 +30,9 @@ const {
   TIPOS_POR_CATEGORIA,
   ROTULOS_CATEGORIA,
   ROTULOS_TIPO,
+  USO_POR_TIPO,
+  PERGUNTA_POR_TIPO,
+  EXPLICACAO_SEM_TIPO,
   CICLOS,
   CICLO_PADRAO,
   MESES_POR_CICLO,
@@ -35,11 +41,32 @@ const {
   ROTULOS_STATUS,
   CHECKLIST,
 } = require("./subscriptionsTaxonomia");
+const {
+  PASSOS_PARA_CANCELAR,
+  LOJAS_DE_APLICATIVOS,
+  DIREITOS_DO_CONSUMIDOR,
+  AVISO_JURIDICO,
+  servicoPorId,
+  encontrarNoCatalogo,
+} = require("./subscriptionsCatalog");
 
-// Taxa anual de referência (100% do CDI).
-// Atualizar quando o Copom mudar a Selic. Referência: CDI 13,65% a.a.
-// (Banco Central, série SGS 4389, 29/10/2026)
+// Taxas de reserva (100% do CDI e IPCA em 12 meses). Sprint 4: as atuais vêm do
+// Banco Central pelo taxasService; estas valem quando ele não responde.
+// Referência: CDI 13,65% a.a. (SGS 4389, 29/10/2026) e IPCA 4,58% (SGS 13522, set/2026)
 const TAXA_ANUAL_CDI = 0.1365;
+const IPCA_12M_REFERENCIA = 0.0458;
+const DATA_TAXAS_REFERENCIA = "2026-10-29";
+
+// Sprint 4: IR regressivo da renda fixa (Lei 11.033/2004, art. 1º, conferido em
+// 01/11/2026 no planalto.gov.br). O prazo de cada aporte é contado em dias
+// aproximados (meses x 365/12). O IOF fica de fora: só vale para resgate em menos de 30 dias.
+const TABELA_IR = [
+  { ateDias: 180, aliquota: 0.225 },
+  { ateDias: 360, aliquota: 0.2 },
+  { ateDias: 720, aliquota: 0.175 },
+  { ateDias: Infinity, aliquota: 0.15 },
+];
+const DIAS_POR_MES = 365 / 12;
 
 // Períodos usados no custo invisível e na projeção de juros (em meses)
 const PERIODOS_MESES = [12, 36, 60];
@@ -56,6 +83,24 @@ const LIMITE_CUSTO_NEUTRO = 15;
 const VALOR_MENSAL_MAXIMO = 10000;
 const NOME_MAXIMO = 60;
 const COMPARTILHADA_COM_MAXIMO = 20;
+
+// Sprint 4: uma verificação de uso vale 30 dias; depois, a tela pede para reavaliar
+const VALIDADE_VERIFICACAO_DIAS = 30;
+const HISTORICO_USO_MAXIMO = 12;
+
+// Sprint 4: meta de gasto com assinaturas, em % da renda (a pessoa ajusta)
+const LIMITE_PERCENTUAL_RENDA_PADRAO = 5;
+const LIMITE_PERCENTUAL_RENDA_MAXIMO = 50;
+
+// Sprint 4: score de eficiência (0 a 100). Começa em 100 e perde pontos por
+// custo-benefício ruim, falta de verificação recente, concorrência e peso na renda.
+const PENALIDADE_CUSTO_BENEFICIO = { excelente: 0, neutro: 15, prejuizo: 40 };
+const PENALIDADE_SEM_VERIFICACAO = 10;
+const PENALIDADE_CONCORRENTE = 20;
+const PENALIDADE_POR_PONTO_DA_RENDA = 8;
+const PENALIDADE_RENDA_MAXIMA = 20;
+const SCORE_BOM = 70;
+const SCORE_ATENCAO = 40;
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
@@ -85,11 +130,12 @@ const SEED_INICIAL = [
   // Sprint 3: concorre com o id 1 (dois streamings de vídeo ativos) para o alerta aparecer na demo
   { id: 7, nome: "Streaming de Séries", valorMensal: 34.9, ativo: true, categoria: "streaming", tipo: "video", cobrancaEmDias: 1 },
   // Sprint 4: teste grátis acabando, para o card de próximas cobranças aparecer na demo
-  { id: 8, nome: "Aplicativo de Idiomas", valorCobrado: 34.9, status: "teste", categoria: "outros", fimTesteEmDias: 5 },
+  { id: 8, nome: "Aplicativo de Idiomas", valorCobrado: 34.9, status: "teste", categoria: "outros", tipo: "educacao", fimTesteEmDias: 5 },
 ];
 
 let subscriptions = [];
 let auditoria = [];
+let configuracoes = { limitePercentualRenda: LIMITE_PERCENTUAL_RENDA_PADRAO };
 // Sprint 4: contador próprio, para o id de uma assinatura removida não ser
 // reaproveitado (a auditoria guarda o id e passaria a apontar para outra)
 let proximoIdLivre = 1;
@@ -160,6 +206,8 @@ function normalizar(s) {
     canceladaEm,
     usoMensal: s.usoMensal ?? null,
     // Sprint 4
+    historicoUso: Array.isArray(s.historicoUso) ? s.historicoUso.map((v) => ({ ...v })) : [],
+    catalogoId: s.catalogoId ?? encontrarNoCatalogo(s.nome)?.id ?? null,
     status,
     ciclo,
     valorCobrado,
@@ -225,6 +273,7 @@ function seedPadrao(agora) {
 function inicializar(seed, { agora = new Date() } = {}) {
   subscriptions = (seed ?? seedPadrao(agora)).map(normalizar);
   auditoria = [];
+  configuracoes = { limitePercentualRenda: LIMITE_PERCENTUAL_RENDA_PADRAO };
   proximoIdLivre = Math.max(0, ...subscriptions.map((s) => s.id)) + 1;
 
   if (!seed) {
@@ -287,23 +336,35 @@ function copiar({ dataBaseCobranca, periodosSemCobranca, ...s }) {
   return {
     ...s,
     usoMensal: s.usoMensal ? { ...s.usoMensal } : null,
+    historicoUso: s.historicoUso.map((v) => ({ ...v })),
     historicoPrecos: s.historicoPrecos.map((p) => ({ ...p })),
   };
 }
 
-// Sprint 4: o que sai na API: a cópia mais os campos calculados para hoje
-function paraApi(s, dataHoje) {
-  return {
+// Sprint 4: o que sai na API: a cópia mais os campos calculados para hoje. Com o
+// contexto do Perfil (montarContexto), traz também horas de trabalho e eficiência.
+function paraApi(s, dataHoje, contexto = null) {
+  const api = {
     ...copiar(s),
     proximaCobranca: proximaCobranca(s, dataHoje),
     economizadoAteHoje: calcularEconomizado(s, dataHoje),
   };
+  // Verificação de uso com mais de 30 dias aparece como vencida
+  if (api.usoMensal) api.usoMensal.vencida = !verificacaoValida(s.usoMensal, dataHoje);
+  if (contexto) {
+    api.horasDeTrabalho = contexto.valorHora > 0 ? arredondar(s.valorMensal / contexto.valorHora) : null;
+    api.eficiencia = s.ativo ? calcularEficiencia(s, contexto, dataHoje) : null;
+  }
+  return api;
 }
 
-function getSubscriptions({ agora = new Date() } = {}) {
+// Sprint 4: com o Perfil ({ valorHora, salario }), cada assinatura traz as horas de
+// trabalho que custa por mês e o score de eficiência
+function getSubscriptions({ agora = new Date(), perfil = null } = {}) {
   sincronizar(agora);
   const dataHoje = hoje(agora);
-  return subscriptions.map((s) => paraApi(s, dataHoje));
+  const contexto = perfil ? montarContexto(perfil, dataHoje) : null;
+  return subscriptions.map((s) => paraApi(s, dataHoje, contexto));
 }
 
 function getEconomiaTotal({ agora = new Date() } = {}) {
@@ -335,11 +396,15 @@ function addSubscription(dados, { agora = new Date() } = {}) {
 
   const status = dados.status === "teste" ? "teste" : "ativa";
   const fimTeste = status === "teste" ? dados.fimTeste : null;
+  // Sprint 4: serviço conhecido (escolhido no autocomplete ou reconhecido pelo nome)
+  // completa a categoria e o tipo que não vieram
+  const servico = (dados.catalogoId && servicoPorId(dados.catalogoId)) || encontrarNoCatalogo(dados.nome);
   const novaAssinatura = normalizar({
     id: proximoId(),
     nome: dados.nome,
-    categoria: dados.categoria,
-    tipo: dados.tipo,
+    categoria: dados.categoria ?? servico?.categoria,
+    tipo: dados.tipo !== undefined ? dados.tipo : servico?.tipo,
+    catalogoId: servico?.id ?? null,
     status,
     ciclo,
     valorCobrado,
@@ -371,44 +436,95 @@ function getAuditoria({ agora = new Date() } = {}) {
   return auditoria.map((e) => ({ ...e })).reverse();
 }
 
-// Custo Invisível: quanto cada assinatura cobrada custa acumulada em 12, 36 e 60 meses
-function calcularCustoInvisivel({ agora = new Date() } = {}) {
+// Sprint 4: alíquota do IR regressivo para um aporte que ficou "dias" aplicado
+function aliquotaIr(dias) {
+  return TABELA_IR.find((faixa) => dias <= faixa.ateDias).aliquota;
+}
+
+// Sprint 4: aportes mensais iguais aplicados por "meses", com o IR de cada aporte (o
+// mais antigo rendeu por mais tempo e paga alíquota menor). Mesma convenção de
+// montanteComAportes: o aporte k entra no fim do mês k.
+function simularAportes(aporteMensal, meses, taxaMensal) {
+  let montante = 0;
+  let impostoRenda = 0;
+  for (let k = 1; k <= meses; k += 1) {
+    const mesesAplicado = meses - k;
+    const ganho = aporteMensal * (Math.pow(1 + taxaMensal, mesesAplicado) - 1);
+    montante += aporteMensal + ganho;
+    impostoRenda += ganho * aliquotaIr(mesesAplicado * DIAS_POR_MES);
+  }
+  return { montante, impostoRenda };
+}
+
+// Sprint 4: soma das mensalidades com o preço subindo pelo IPCA a cada 12 meses
+function totalComReajuste(valorMensal, meses, reajusteAnual) {
+  let total = 0;
+  for (let mes = 0; mes < meses; mes += 1) {
+    total += valorMensal * Math.pow(1 + reajusteAnual, Math.floor(mes / 12));
+  }
+  return arredondar(total);
+}
+
+// Custo Invisível: quanto cada assinatura cobrada custa acumulada em 12, 36 e 60 meses.
+// Sprint 4: também com reajuste anual pelo IPCA (comReajuste) e quanto o mesmo
+// dinheiro viraria aplicado a 100% do CDI, já sem o IR (seInvestido): o custo de oportunidade.
+function calcularCustoInvisivel({ agora = new Date(), ipca12m = IPCA_12M_REFERENCIA, taxaAnual = TAXA_ANUAL_CDI } = {}) {
   sincronizar(agora);
   const pagantes = getPagantes();
   const gastoMensal = somarValorMensal(pagantes);
+  const taxaMensal = taxaMensalEquivalente(taxaAnual);
+
+  const projetar = (valorMensal) =>
+    PERIODOS_MESES.map((meses) => {
+      const { montante, impostoRenda } = simularAportes(valorMensal, meses, taxaMensal);
+      return {
+        meses,
+        valor: multiplicar(valorMensal, meses),
+        comReajuste: totalComReajuste(valorMensal, meses, ipca12m),
+        seInvestido: arredondar(montante - impostoRenda),
+      };
+    });
 
   const itens = pagantes.map((s) => ({
     id: s.id,
     nome: s.nome,
     categoria: s.categoria,
     valorMensal: s.valorMensal,
-    projecoes: PERIODOS_MESES.map((meses) => ({
-      meses,
-      valor: multiplicar(s.valorMensal, meses),
-    })),
+    projecoes: projetar(s.valorMensal),
   }));
 
-  const totais = PERIODOS_MESES.map((meses) => ({
-    meses,
-    valor: multiplicar(gastoMensal, meses),
-  }));
-
-  return { gastoMensal, itens, totais };
+  return {
+    gastoMensal,
+    reajusteAnualPercentual: arredondar(ipca12m * 100),
+    itens,
+    totais: projetar(gastoMensal),
+  };
 }
 
-// Juros compostos: a economia das canceladas aplicada todo mês a 100% do CDI
-function calcularProjecaoJuros(taxaAnual = TAXA_ANUAL_CDI, { agora = new Date() } = {}) {
+// Juros compostos: a economia das canceladas aplicada todo mês a 100% do CDI.
+// Sprint 4: com o IR regressivo de cada aporte (montanteLiquido) e a origem da taxa
+// ("bcb" quando veio do Banco Central, "fallback" quando é a de reserva).
+function calcularProjecaoJuros(
+  taxaAnual = TAXA_ANUAL_CDI,
+  { agora = new Date(), fonteTaxa = "fallback", taxaAtualizadaEm = DATA_TAXAS_REFERENCIA } = {}
+) {
   const { economiaMensal } = getEconomiaTotal({ agora });
   const taxaMensal = taxaMensalEquivalente(taxaAnual);
 
   const calcularPonto = (meses) => {
     const totalAportado = economiaMensal * meses;
     const montante = montanteComAportes(economiaMensal, meses, taxaMensal);
+    const { impostoRenda } = simularAportes(economiaMensal, meses, taxaMensal);
+    const montanteBruto = arredondar(montante);
+    const imposto = arredondar(impostoRenda);
     return {
       meses,
       totalAportado: arredondar(totalAportado),
-      montante: arredondar(montante),
+      montante: montanteBruto,
       rendimento: arredondar(montante - totalAportado),
+      impostoRenda: imposto,
+      // Do bruto e do imposto já arredondados, para a conta fechar na tela
+      montanteLiquido: arredondar(montanteBruto - imposto),
     };
   };
 
@@ -421,6 +537,8 @@ function calcularProjecaoJuros(taxaAnual = TAXA_ANUAL_CDI, { agora = new Date() 
   return {
     economiaMensal,
     taxaAnualPercentual: arredondar(taxaAnual * 100),
+    fonteTaxa,
+    taxaAtualizadaEm,
     periodos: PERIODOS_MESES.map(calcularPonto),
     curva,
   };
@@ -467,21 +585,40 @@ function getResumoDetox({ agora = new Date() } = {}) {
 // Sprint 3 - Custo por uso
 // ---------------------------------------------------------------------------
 
-function classificarCustoPorUso(custoPorUso) {
+// Sprint 4: com a referência do tipo, metade dela ou menos é excelente e até ela é
+// neutro. Sem tipo, valem os limites gerais da Sprint 3.
+function classificarCustoPorUso(custoPorUso, referencia = null) {
   if (custoPorUso === null) return "prejuizo"; // pagou e não usou nenhuma vez
-  if (custoPorUso <= LIMITE_CUSTO_EXCELENTE) return "excelente";
-  if (custoPorUso <= LIMITE_CUSTO_NEUTRO) return "neutro";
+  const limiteExcelente = referencia ? referencia / 2 : LIMITE_CUSTO_EXCELENTE;
+  const limiteNeutro = referencia ?? LIMITE_CUSTO_NEUTRO;
+  if (custoPorUso <= limiteExcelente) return "excelente";
+  if (custoPorUso <= limiteNeutro) return "neutro";
   return "prejuizo";
 }
 
-// Calcula quanto custa cada uso no mês e guarda o resultado na assinatura,
-// para a lista e o detector de zumbis poderem usar depois.
-// Retorna null se o id não existir e { erro } se ela estiver cancelada ou pausada.
-function calcularCustoUso(id, frequenciaUso, { agora = new Date() } = {}) {
+// Sprint 4: como medir o custo-benefício de cada tipo: contando usos (com a
+// referência do tipo), com uma pergunta ou, no plano de saúde, de jeito nenhum
+function formaDeVerificar(tipo) {
+  if (tipo == null) return { forma: "uso", referencia: null, explicacao: EXPLICACAO_SEM_TIPO };
+  if (USO_POR_TIPO[tipo]) return { forma: "uso", ...USO_POR_TIPO[tipo] };
+  if (PERGUNTA_POR_TIPO[tipo]) return { forma: "pergunta", pergunta: PERGUNTA_POR_TIPO[tipo] };
+  return { forma: "nenhuma" };
+}
+
+// Sprint 4: verificação velha não decide mais nada; vale até validaAte
+function verificacaoValida(usoMensal, dataHoje) {
+  return Boolean(usoMensal?.validaAte) && usoMensal.validaAte >= dataHoje;
+}
+
+// Sprint 4: POST /:id/usage-check. Nos tipos com "uso", divide a mensalidade pelos
+// usos e compara com a referência do tipo; nos tipos com pergunta, guarda a
+// resposta. A verificação vale 30 dias e entra no histórico. Retorna null se o id
+// não existir e { erro } se a assinatura não estiver ativa ou faltar o dado do tipo.
+function verificarUso(id, { frequenciaUso, resposta } = {}, { agora = new Date() } = {}) {
   sincronizar(agora);
   const assinatura = encontrar(id);
   if (!assinatura) return null;
-  // Sprint 4: medir o uso de algo cancelado ou pausado não faz sentido (o controller responde 400)
+  // Medir o uso de algo cancelado ou pausado não faz sentido (o controller responde 400)
   if (!assinatura.ativo) {
     const comoVoltar = assinatura.status === "pausada" ? "Retome-a" : "Reative-a";
     return {
@@ -489,22 +626,56 @@ function calcularCustoUso(id, frequenciaUso, { agora = new Date() } = {}) {
     };
   }
 
-  const usos = Number(frequenciaUso);
-  const custoPorUso = usos > 0 ? arredondar(assinatura.valorMensal / usos) : null;
+  const como = formaDeVerificar(assinatura.tipo);
+  let verificacao;
+  if (como.forma === "nenhuma") {
+    return {
+      erro: `Para ${ROTULOS_TIPO[assinatura.tipo].descricao}, o Detox não mede custo por uso: é proteção, e não algo que se usa todo mês.`,
+    };
+  }
+  if (como.forma === "pergunta") {
+    if (typeof resposta !== "boolean") {
+      return { erro: `Para este tipo, envie 'resposta' (true ou false): ${como.pergunta}` };
+    }
+    // "Sim" quer dizer que vale manter
+    verificacao = {
+      forma: "pergunta",
+      pergunta: como.pergunta,
+      resposta,
+      classificacao: resposta ? "neutro" : "prejuizo",
+    };
+  } else {
+    if (frequenciaUso == null) {
+      return { erro: "Envie 'frequenciaUso': quantas vezes você usou no último mês." };
+    }
+    const usos = Number(frequenciaUso);
+    const custoPorUso = usos > 0 ? arredondar(assinatura.valorMensal / usos) : null;
+    verificacao = {
+      forma: "uso",
+      frequenciaUso: usos,
+      custoPorUso,
+      referencia: como.referencia,
+      classificacao: classificarCustoPorUso(custoPorUso, como.referencia),
+    };
+  }
+  verificacao.verificadoEm = agora.toISOString();
+  verificacao.validaAte = adicionarDias(hoje(agora), VALIDADE_VERIFICACAO_DIAS);
 
-  assinatura.usoMensal = {
-    frequenciaUso: usos,
-    custoPorUso,
-    classificacao: classificarCustoPorUso(custoPorUso),
-    verificadoEm: agora.toISOString(),
-  };
+  assinatura.usoMensal = verificacao;
+  assinatura.historicoUso = [...assinatura.historicoUso, { ...verificacao }].slice(-HISTORICO_USO_MAXIMO);
 
   return {
     id: assinatura.id,
     nome: assinatura.nome,
     valorMensal: assinatura.valorMensal,
-    ...assinatura.usoMensal,
+    ...verificacao,
   };
+}
+
+// Calcula quanto custa cada uso no mês e guarda o resultado na assinatura, para a
+// lista e o detector de zumbis usarem depois. Sprint 4: virou atalho de verificarUso.
+function calcularCustoUso(id, frequenciaUso, opcoes) {
+  return verificarUso(id, { frequenciaUso }, opcoes);
 }
 
 // ---------------------------------------------------------------------------
@@ -515,8 +686,10 @@ function calcularCustoUso(id, frequenciaUso, { agora = new Date() } = {}) {
 // depois quem nunca foi verificado, e por último neutro/excelente.
 const PESO_CLASSIFICACAO = { prejuizo: 0, sem_verificacao: 1, neutro: 2, excelente: 3 };
 
-function pesoParaManter(s) {
-  return PESO_CLASSIFICACAO[s.usoMensal?.classificacao ?? "sem_verificacao"];
+// Sprint 4: verificação vencida conta como "sem verificação"
+function pesoParaManter(s, dataHoje) {
+  const classificacao = verificacaoValida(s.usoMensal, dataHoje) ? s.usoMensal.classificacao : "sem_verificacao";
+  return PESO_CLASSIFICACAO[classificacao];
 }
 
 // "2026-11-08" -> "08/11"
@@ -526,20 +699,24 @@ function diaEMes(data) {
 
 // Sugere pausar UMA assinatura do grupo: a de pior custo-benefício;
 // empatando, a mais cara. O usuário continua com as outras.
-function escolherSugestaoPausa(grupo) {
+function escolherSugestaoPausa(grupo, dataHoje) {
   const ordenado = [...grupo].sort(
-    (a, b) => pesoParaManter(a) - pesoParaManter(b) || b.valorMensal - a.valorMensal
+    (a, b) => pesoParaManter(a, dataHoje) - pesoParaManter(b, dataHoje) || b.valorMensal - a.valorMensal
   );
   const escolhida = ordenado[0];
+  const verificacao = verificacaoValida(escolhida.usoMensal, dataHoje) ? escolhida.usoMensal : null;
 
   let motivo = "É a mais cara entre serviços que fazem a mesma coisa.";
   if (escolhida.status === "teste" && escolhida.fimTeste) {
     // Sprint 4: um teste grátis cancelado antes do fim nem chega a cobrar
     motivo = `Ainda está no teste grátis: cancelando antes de ${diaEMes(escolhida.fimTeste)}, a primeira cobrança não acontece.`;
-  } else if (escolhida.usoMensal?.frequenciaUso === 0) {
+  } else if (verificacao?.forma === "uso" && verificacao.frequenciaUso === 0) {
     motivo = "Você não usou nenhuma vez no último mês.";
-  } else if (escolhida.usoMensal?.classificacao === "prejuizo") {
-    motivo = `Custo por uso alto: R$ ${escolhida.usoMensal.custoPorUso.toFixed(2).replace(".", ",")} a cada vez que você usa.`;
+  } else if (verificacao?.classificacao === "prejuizo") {
+    motivo =
+      verificacao.forma === "uso"
+        ? `Custo por uso alto: R$ ${verificacao.custoPorUso.toFixed(2).replace(".", ",")} a cada vez que você usa.`
+        : "Pela sua resposta, ela não está compensando.";
   }
 
   return {
@@ -553,9 +730,9 @@ function escolherSugestaoPausa(grupo) {
   };
 }
 
-function detectarRedundancias({ agora = new Date() } = {}) {
-  sincronizar(agora);
-  const dataHoje = hoje(agora);
+// Grupos de assinaturas ativas (ou em teste) do mesmo tipo, com a sugestão de cada um.
+// Sprint 4: separado para o score de eficiência e a revisão do mês usarem também.
+function gruposDeConcorrentes(dataHoje) {
   const porTipo = {};
   getAtivas()
     .filter((s) => s.tipo)
@@ -564,15 +741,23 @@ function detectarRedundancias({ agora = new Date() } = {}) {
       porTipo[s.tipo].push(s);
     });
 
-  const grupos = Object.entries(porTipo)
+  return Object.entries(porTipo)
     .filter(([, lista]) => lista.length >= 2)
-    .map(([tipo, lista]) => ({
+    .map(([tipo, lista]) => ({ tipo, lista, sugestaoPausa: escolherSugestaoPausa(lista, dataHoje) }));
+}
+
+function detectarRedundancias({ agora = new Date() } = {}) {
+  sincronizar(agora);
+  const dataHoje = hoje(agora);
+
+  const grupos = gruposDeConcorrentes(dataHoje)
+    .map(({ tipo, lista, sugestaoPausa }) => ({
       tipo,
       categoria: lista[0].categoria,
       quantidade: lista.length,
       gastoMensal: somarValorMensal(lista),
       assinaturas: lista.map((s) => paraApi(s, dataHoje)),
-      sugestaoPausa: escolherSugestaoPausa(lista),
+      sugestaoPausa,
     }))
     .sort((a, b) => b.gastoMensal - a.gastoMensal);
 
@@ -804,16 +989,215 @@ function getMeta() {
     categorias: CATEGORIAS.map((valor) => ({
       valor,
       rotulo: ROTULOS_CATEGORIA[valor],
-      tipos: TIPOS_POR_CATEGORIA[valor].map((tipo) => ({ valor: tipo, ...ROTULOS_TIPO[tipo] })),
+      // Como o app verifica o custo-benefício de cada tipo (uso, pergunta ou nenhuma)
+      tipos: TIPOS_POR_CATEGORIA[valor].map((tipo) => ({
+        valor: tipo,
+        ...ROTULOS_TIPO[tipo],
+        verificacao: formaDeVerificar(tipo),
+      })),
     })),
+    verificacaoSemTipo: formaDeVerificar(null),
     ciclos: CICLOS.map((valor) => ({ valor, ...ROTULOS_CICLO[valor] })),
     status: STATUS.map((valor) => ({ valor, rotulo: ROTULOS_STATUS[valor] })),
     limites: {
       valorMensalMaximo: VALOR_MENSAL_MAXIMO,
       nomeMaximo: NOME_MAXIMO,
       compartilhadaComMaximo: COMPARTILHADA_COM_MAXIMO,
+      limitePercentualRendaMaximo: LIMITE_PERCENTUAL_RENDA_MAXIMO,
     },
     checklist: CHECKLIST.map((item) => ({ ...item })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 - Eficiência, limite de gasto, revisão do mês e guia de cancelamento
+// ---------------------------------------------------------------------------
+
+// 1.142 -> "1,1%"
+function percentualNaFrase(valor) {
+  return `${valor.toFixed(1).replace(".", ",")}%`;
+}
+
+// O que o score e a revisão precisam além da assinatura: o Perfil (somente
+// leitura, vem do controller) e quem está em grupo de concorrentes
+function montarContexto({ valorHora, salario } = {}, dataHoje) {
+  const grupos = gruposDeConcorrentes(dataHoje);
+  return {
+    valorHora: Number(valorHora),
+    salario: Number(salario),
+    idsConcorrentes: new Set(grupos.flatMap((g) => g.lista.map((s) => s.id))),
+    idsSugeridos: new Set(grupos.map((g) => g.sugestaoPausa.id)),
+  };
+}
+
+// Score de eficiência de 0 a 100: quanto maior, mais a assinatura vale o que custa.
+// Começa em 100 e perde:
+//   custo-benefício da última verificação válida: neutro -15, prejuízo -40
+//   nenhuma verificação nos últimos 30 dias: -10 (plano de saúde não perde, não se mede)
+//   outro serviço ativo do mesmo tipo: -20
+//   peso na renda: -8 por ponto percentual do salário, até -20
+// nivel: "bom" (70 ou mais), "atencao" (40 a 69) ou "ruim" (abaixo de 40)
+function calcularEficiencia(s, { salario, idsConcorrentes }, dataHoje) {
+  const fatores = [];
+
+  if (verificacaoValida(s.usoMensal, dataHoje)) {
+    const pontos = PENALIDADE_CUSTO_BENEFICIO[s.usoMensal.classificacao];
+    if (pontos > 0) {
+      const motivo =
+        s.usoMensal.classificacao === "prejuizo"
+          ? "Custo-benefício ruim na última verificação"
+          : "Custo-benefício só razoável na última verificação";
+      fatores.push({ fator: "custo_beneficio", pontos: -pontos, motivo });
+    }
+  } else if (formaDeVerificar(s.tipo).forma !== "nenhuma") {
+    fatores.push({
+      fator: "sem_verificacao",
+      pontos: -PENALIDADE_SEM_VERIFICACAO,
+      motivo: "Uso não verificado nos últimos 30 dias",
+    });
+  }
+
+  if (idsConcorrentes.has(s.id)) {
+    fatores.push({
+      fator: "concorrente",
+      pontos: -PENALIDADE_CONCORRENTE,
+      motivo: "Outro serviço ativo faz a mesma coisa",
+    });
+  }
+
+  if (salario > 0) {
+    const percentual = (s.valorMensal / salario) * 100;
+    const pontos = Math.min(PENALIDADE_RENDA_MAXIMA, Math.round(percentual * PENALIDADE_POR_PONTO_DA_RENDA));
+    if (pontos > 0) {
+      fatores.push({ fator: "renda", pontos: -pontos, motivo: `Consome ${percentualNaFrase(percentual)} da sua renda` });
+    }
+  }
+
+  const score = Math.max(0, 100 + fatores.reduce((total, f) => total + f.pontos, 0));
+  const nivel = score >= SCORE_BOM ? "bom" : score >= SCORE_ATENCAO ? "atencao" : "ruim";
+  return { score, nivel, fatores };
+}
+
+// Quanto da renda vai para as assinaturas cobradas, comparado à meta escolhida.
+// Sem salário no Perfil, os valores que dependem dele ficam nulos.
+function calcularLimiteDeGasto({ salario, agora = new Date() } = {}) {
+  sincronizar(agora);
+  const gastoMensal = somarValorMensal(getPagantes());
+  const limitePercentual = configuracoes.limitePercentualRenda;
+  const renda = Number(salario);
+
+  if (!(renda > 0)) {
+    return {
+      limitePercentual,
+      gastoMensal,
+      salario: null,
+      limiteMensal: null,
+      percentualAtual: null,
+      acimaDoLimite: false,
+    };
+  }
+
+  const limiteMensal = multiplicar(renda, limitePercentual / 100);
+  return {
+    limitePercentual,
+    gastoMensal,
+    salario: renda,
+    limiteMensal,
+    percentualAtual: arredondar((gastoMensal / renda) * 100),
+    acimaDoLimite: gastoMensal > limiteMensal,
+  };
+}
+
+function getConfiguracoes() {
+  return { ...configuracoes };
+}
+
+// PATCH /settings (a validação vem pronta do middleware)
+function atualizarConfiguracoes({ limitePercentualRenda }) {
+  if (limitePercentualRenda !== undefined) configuracoes.limitePercentualRenda = Number(limitePercentualRenda);
+  return getConfiguracoes();
+}
+
+// Sugestão de cada cartão da revisão do mês
+function sugestaoDaRevisao(assinatura, contexto) {
+  if (assinatura.status === "teste") {
+    return {
+      sugestao: "decidir",
+      motivo: `O teste grátis acaba em ${diaEMes(assinatura.fimTeste)}: se não for continuar, cancele antes.`,
+    };
+  }
+  const verificacao = assinatura.usoMensal && !assinatura.usoMensal.vencida ? assinatura.usoMensal : null;
+  if (verificacao?.classificacao === "prejuizo") {
+    const motivo =
+      verificacao.forma === "uso" ? "O custo por uso está alto." : "Pela sua resposta, ela não está compensando.";
+    return { sugestao: "cancelar", motivo };
+  }
+  if (contexto.idsSugeridos.has(assinatura.id)) {
+    return { sugestao: "pausar", motivo: "Outro serviço ativo faz a mesma coisa." };
+  }
+  const { forma } = formaDeVerificar(assinatura.tipo);
+  if (!verificacao && forma !== "nenhuma") {
+    const motivo =
+      forma === "pergunta"
+        ? "Responda uma pergunta rápida para saber se ela compensa."
+        : "Confira quanto você usou neste mês.";
+    return { sugestao: "verificar", motivo };
+  }
+  return { sugestao: "manter", motivo: "Está valendo o que custa." };
+}
+
+// GET /review ("Detox do mês"): um cartão por assinatura ativa ou em teste, da que
+// mais pede atenção (menor score) para a que menos pede, com a forma de verificar o
+// uso e uma sugestão (cancelar, pausar, verificar, decidir ou manter)
+function getRevisaoDoMes({ perfil = {}, agora = new Date() } = {}) {
+  sincronizar(agora);
+  const dataHoje = hoje(agora);
+  const contexto = montarContexto(perfil, dataHoje);
+
+  const itens = getAtivas()
+    .map((s) => {
+      const assinatura = paraApi(s, dataHoje, contexto);
+      return { assinatura, verificacao: formaDeVerificar(s.tipo), ...sugestaoDaRevisao(assinatura, contexto) };
+    })
+    .sort(
+      (a, b) =>
+        a.assinatura.eficiencia.score - b.assinatura.eficiencia.score ||
+        b.assinatura.valorMensal - a.assinatura.valorMensal
+    );
+
+  return {
+    mes: dataHoje.slice(0, 7),
+    valorHora: contexto.valorHora > 0 ? contexto.valorHora : null,
+    gastoMensal: somarValorMensal(getPagantes()),
+    itens,
+  };
+}
+
+// Bancos, cartões, seguros e planos de saúde são serviços regulados pelo governo
+// federal (vale o Decreto 11.034); streaming e aplicativos, não
+function ehServicoRegulado(s) {
+  return s.categoria === "financeiro" || s.tipo === "plano_saude";
+}
+
+// GET /:id/cancel-guide: passo a passo, link oficial (quando o serviço está no
+// catálogo), lojas de aplicativo e os direitos que valem para o caso
+function getGuiaDeCancelamento(id, { agora = new Date() } = {}) {
+  sincronizar(agora);
+  const assinatura = encontrar(id);
+  if (!assinatura) return null;
+
+  const servico =
+    (assinatura.catalogoId && servicoPorId(assinatura.catalogoId)) || encontrarNoCatalogo(assinatura.nome);
+  const regulado = ehServicoRegulado(assinatura);
+
+  return {
+    assinatura: paraApi(assinatura, hoje(agora)),
+    servico: servico ? { id: servico.id, nome: servico.nome } : null,
+    linkCancelamento: servico?.linkCancelamento ?? null,
+    passos: [...PASSOS_PARA_CANCELAR],
+    lojas: LOJAS_DE_APLICATIVOS.map((loja) => ({ ...loja })),
+    direitos: DIREITOS_DO_CONSUMIDOR.filter((d) => !d.regulados || regulado).map(({ regulados, ...d }) => d),
+    aviso: AVISO_JURIDICO,
   };
 }
 
@@ -871,15 +1255,24 @@ module.exports = {
   alterarStatus,
   getProximasCobrancas,
   getMeta,
+  verificarUso,
+  calcularLimiteDeGasto,
+  getConfiguracoes,
+  atualizarConfiguracoes,
+  getRevisaoDoMes,
+  getGuiaDeCancelamento,
   CATEGORIAS,
   TIPOS_POR_CATEGORIA,
   CICLOS,
   STATUS,
   TAXA_ANUAL_CDI,
+  IPCA_12M_REFERENCIA,
+  DATA_TAXAS_REFERENCIA,
   PERIODOS_MESES,
   VALOR_MENSAL_MAXIMO,
   NOME_MAXIMO,
   COMPARTILHADA_COM_MAXIMO,
+  LIMITE_PERCENTUAL_RENDA_MAXIMO,
   // Apenas para testes
   _resetForTests: inicializar,
 };

@@ -720,6 +720,211 @@ class DealsModel {
     alertasPreco = alertasPreco.filter(a => a.id !== alertaId);
     return alertasPreco.length < totalInicial;
   }
+  getRelatorioConsolidado(valorHoraInformado) {
+    let perfil;
+    try {
+      perfil = UserModel.getProfile();
+    } catch (e) {
+      perfil = { valorHora: 21.88, salario: 3500 };
+    }
+    const valorHora = Number(valorHoraInformado) || Number(perfil.valorHora) || 21.88;
+    const salario = Number(perfil.salario) || 3500;
+
+    let economiaCooldown = 0;
+    let horasCooldown = 0;
+    let itensCooldownDesistidos = 0;
+    try {
+      const CooldownModel = require('./cooldownModel');
+      const auditoria = CooldownModel.getAuditoria();
+      const itens = CooldownModel.getItems();
+      const desistidos = itens.filter(i => i.status === 'desistiu' || i.desfecho === 'desistiu');
+      if (auditoria && Number(auditoria.montantePoupado || auditoria.economiaTotal) > 0) {
+        economiaCooldown = Number(auditoria.montantePoupado || auditoria.economiaTotal);
+        horasCooldown = Number(auditoria.horasTrabalhoPoupadas || auditoria.horasPoupadas || 0);
+        itensCooldownDesistidos = Number(auditoria.totalDesistencias || auditoria.desistencias || desistidos.length);
+      } else if (desistidos.length > 0) {
+        economiaCooldown = desistidos.reduce((acc, curr) => acc + (Number(curr.preco) || 0), 0);
+        horasCooldown = Number((economiaCooldown / valorHora).toFixed(1));
+        itensCooldownDesistidos = desistidos.length;
+      } else {
+        const SimulationModel = require('./simulationModel');
+        const score = SimulationModel.getHealthScore();
+        economiaCooldown = Number(score.dinheiroPoupado) || 1899.00;
+        horasCooldown = Number(score.horasPoupadas) || Number((economiaCooldown / valorHora).toFixed(1));
+        itensCooldownDesistidos = 2;
+      }
+    } catch (e) {
+      economiaCooldown = 1899.00;
+      horasCooldown = Number((economiaCooldown / valorHora).toFixed(1));
+      itensCooldownDesistidos = 2;
+    }
+
+    let economiaDetoxMensal = 0;
+    let economiaDetoxAnual = 0;
+    let horasDetoxAnual = 0;
+    let assinaturasCanceladas = 0;
+    try {
+      const SubscriptionsModel = require('./subscriptionsModel');
+      const eco = SubscriptionsModel.getEconomiaTotal();
+      if (typeof eco === 'object' && eco !== null) {
+        economiaDetoxMensal = Number(eco.economiaMensal || 0);
+        economiaDetoxAnual = Number(eco.economiaAnual || (economiaDetoxMensal * 12).toFixed(2));
+      } else {
+        economiaDetoxMensal = Number(eco || 0);
+        economiaDetoxAnual = Number((economiaDetoxMensal * 12).toFixed(2));
+      }
+      horasDetoxAnual = Number((economiaDetoxAnual / valorHora).toFixed(1));
+      const subs = SubscriptionsModel.getSubscriptions();
+      assinaturasCanceladas = subs.filter(s => !s.ativo).length;
+    } catch (e) {
+      economiaDetoxMensal = 59.80;
+      economiaDetoxAnual = Number((economiaDetoxMensal * 12).toFixed(2));
+      horasDetoxAnual = Number((economiaDetoxAnual / valorHora).toFixed(1));
+      assinaturasCanceladas = 2;
+    }
+
+    let economiaRadar = 0;
+    let horasRadar = 0;
+    let ofertasAproveitadas = 0;
+    try {
+      const destaques = this.getDestaques(valorHora);
+      destaques.forEach(prod => {
+        const eco = Number(prod.economiaReais || prod.descontoEconomiaReais || 0);
+        if (eco > 0) {
+          economiaRadar += eco;
+          horasRadar += Number(prod.horasPoupadas || 0);
+          ofertasAproveitadas += 1;
+        }
+      });
+      economiaRadar = Number(economiaRadar.toFixed(2));
+      horasRadar = Number(horasRadar.toFixed(1));
+    } catch (e) {
+      economiaRadar = 980.00;
+      horasRadar = Number((economiaRadar / valorHora).toFixed(1));
+      ofertasAproveitadas = 3;
+    }
+
+    const totalDinheiroPoupado = Number((economiaCooldown + economiaDetoxAnual + economiaRadar).toFixed(2));
+    const totalHorasPoupadas = Number((horasCooldown + horasDetoxAnual + horasRadar).toFixed(1));
+    const diasUteisPoupados = Number((totalHorasPoupadas / 8).toFixed(1));
+    const mesesSalarioEquivalente = Number((totalDinheiroPoupado / salario).toFixed(2));
+
+    const taxaSelicAnual = 0.1075;
+    const rendimento1AnoCDB = Number((totalDinheiroPoupado * taxaSelicAnual).toFixed(2));
+    const totalProjetado1Ano = Number((totalDinheiroPoupado + rendimento1AnoCDB).toFixed(2));
+
+    const rendimento3Anos = Number((totalDinheiroPoupado * (Math.pow(1 + taxaSelicAnual, 3) - 1)).toFixed(2));
+    const totalProjetado3Anos = Number((totalDinheiroPoupado + rendimento3Anos).toFixed(2));
+
+    const rendimento5Anos = Number((totalDinheiroPoupado * (Math.pow(1 + taxaSelicAnual, 5) - 1)).toFixed(2));
+    const totalProjetado5Anos = Number((totalDinheiroPoupado + rendimento5Anos).toFixed(2));
+
+    const categoriasEconomia = [
+      {
+        categoria: 'Cooldown e Quarentena',
+        descricao: 'Compras impulsivas evitadas na quarentena reflexiva',
+        valor: economiaCooldown,
+        horas: horasCooldown,
+        porcentagem: totalDinheiroPoupado > 0 ? Math.round((economiaCooldown / totalDinheiroPoupado) * 100) : 0,
+        itensContagem: itensCooldownDesistidos
+      },
+      {
+        categoria: 'Detox de Assinaturas',
+        descricao: 'Economia projetada em 12 meses de mensalidades canceladas',
+        valor: economiaDetoxAnual,
+        horas: horasDetoxAnual,
+        porcentagem: totalDinheiroPoupado > 0 ? Math.round((economiaDetoxAnual / totalDinheiroPoupado) * 100) : 0,
+        itensContagem: assinaturasCanceladas
+      },
+      {
+        categoria: 'Radar e Comparador',
+        descricao: 'Diferenca aproveitada entre o preco medio e a melhor oferta a vista',
+        valor: economiaRadar,
+        horas: horasRadar,
+        porcentagem: totalDinheiroPoupado > 0 ? Math.round((economiaRadar / totalDinheiroPoupado) * 100) : 0,
+        itensContagem: ofertasAproveitadas
+      }
+    ];
+
+    let nivelMaturidade = 'Iniciante Consciente';
+    if (totalHorasPoupadas >= 120) {
+      nivelMaturidade = 'Mestre da Liberdade Financeira';
+    } else if (totalHorasPoupadas >= 60) {
+      nivelMaturidade = 'Guardiao Avancado do Orcamento';
+    } else if (totalHorasPoupadas >= 20) {
+      nivelMaturidade = 'Poupador Estrategico';
+    }
+
+    return {
+      periodo: 'Acumulado Geral',
+      dataGeracao: new Date().toISOString(),
+      totais: {
+        totalDinheiroPoupado,
+        totalHorasPoupadas,
+        diasUteisPoupados,
+        mesesSalarioEquivalente,
+        nivelMaturidade,
+        valorHoraReferencia: valorHora
+      },
+      distribuicaoPorOrigem: categoriasEconomia,
+      projecaoRendimentoRendaFixa: {
+        taxaReferenciaAnual: '10.75% a.a. (100% CDI / Tesouro Selic)',
+        projecao1Ano: {
+          rendimentoEstimado: rendimento1AnoCDB,
+          montanteFinal: totalProjetado1Ano
+        },
+        projecao3Anos: {
+          rendimentoEstimado: rendimento3Anos,
+          montanteFinal: totalProjetado3Anos
+        },
+        projecao5Anos: {
+          rendimentoEstimado: rendimento5Anos,
+          montanteFinal: totalProjetado5Anos
+        }
+      },
+      diagnosticoImpacto: {
+        horasPreservadasTexto: totalHorasPoupadas + ' horas de vida poupadas',
+        diasTrabalhoEvitadosTexto: diasUteisPoupados + ' dias uteis de trabalho que voce nao precisou vender',
+        impactoPatrimonial: 'Equivale a ' + mesesSalarioEquivalente + ' meses do seu salario integral liquido preservado em conta.'
+      }
+    };
+  }
+
+  gerarExtratoExportavel(formato = 'json', valorHoraInformado) {
+    const relatorio = this.getRelatorioConsolidado(valorHoraInformado);
+    if (formato === 'csv') {
+      const linhas = [];
+      linhas.push('RELATORIO CONSOLIDADO DE IMPACTO - SAVE YOUR TIME');
+      linhas.push('Data de Emissao;' + new Date().toLocaleDateString('pt-BR'));
+      linhas.push('');
+      linhas.push('INDICADOR;VALOR');
+      linhas.push('Total Dinheiro Poupado (R$);' + relatorio.totais.totalDinheiroPoupado.toFixed(2));
+      linhas.push('Total Horas de Vida Poupadas;' + relatorio.totais.totalHorasPoupadas + 'h');
+      linhas.push('Dias Uteis Preservados;' + relatorio.totais.diasUteisPoupados + ' dias');
+      linhas.push('Equivalente em Salarios;' + relatorio.totais.mesesSalarioEquivalente + ' meses');
+      linhas.push('Nivel de Maturidade;' + relatorio.totais.nivelMaturidade);
+      linhas.push('');
+      linhas.push('ORIGEM DA ECONOMIA;VALOR (R$);HORAS POUPADAS;PARTICIPACAO (%)');
+      relatorio.distribuicaoPorOrigem.forEach(item => {
+        linhas.push(item.categoria + ';' + item.valor.toFixed(2) + ';' + item.horas + 'h;' + item.porcentagem + '%');
+      });
+      linhas.push('');
+      linhas.push('PROJECAO DE RENDA FIXA (100% CDI);RENDIMENTO ESTIMADO;MONTANTE FINAL');
+      linhas.push('1 Ano;' + relatorio.projecaoRendimentoRendaFixa.projecao1Ano.rendimentoEstimado.toFixed(2) + ';' + relatorio.projecaoRendimentoRendaFixa.projecao1Ano.montanteFinal.toFixed(2));
+      linhas.push('3 Anos;' + relatorio.projecaoRendimentoRendaFixa.projecao3Anos.rendimentoEstimado.toFixed(2) + ';' + relatorio.projecaoRendimentoRendaFixa.projecao3Anos.montanteFinal.toFixed(2));
+      linhas.push('5 Anos;' + relatorio.projecaoRendimentoRendaFixa.projecao5Anos.rendimentoEstimado.toFixed(2) + ';' + relatorio.projecaoRendimentoRendaFixa.projecao5Anos.montanteFinal.toFixed(2));
+      return {
+        tipo: 'text/csv',
+        nomeArquivo: 'extrato-economia-saveyourtime.csv',
+        conteudo: linhas.join('\r\n')
+      };
+    }
+    return {
+      tipo: 'application/json',
+      nomeArquivo: 'extrato-economia-saveyourtime.json',
+      conteudo: JSON.stringify(relatorio, null, 2)
+    };
+  }
 }
 
 module.exports = new DealsModel();

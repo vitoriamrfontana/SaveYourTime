@@ -39,6 +39,34 @@ let historicoSimulacoes = [
   }
 ];
 
+
+let metasLiberdade = [
+  {
+    id: 'meta-1',
+    titulo: 'Reserva de Emergencia (6 Meses)',
+    categoria: 'Seguranca',
+    valorAlvo: 10500.00,
+    valorAtual: 4200.00,
+    dataCriacao: new Date(Date.now() - 86400000 * 30).toISOString()
+  },
+  {
+    id: 'meta-2',
+    titulo: 'Viagem de Ferias sem Dividas',
+    categoria: 'Lazer',
+    valorAlvo: 3500.00,
+    valorAtual: 2100.00,
+    dataCriacao: new Date(Date.now() - 86400000 * 20).toISOString()
+  },
+  {
+    id: 'meta-3',
+    titulo: 'Upgrade Notebook de Trabalho',
+    categoria: 'Produtividade',
+    valorAlvo: 5000.00,
+    valorAtual: 1800.00,
+    dataCriacao: new Date(Date.now() - 86400000 * 10).toISOString()
+  }
+];
+
 class SimulationModel {
   simular({ item, preco, categoria }) {
     const nomeItem = (item || 'Item').trim();
@@ -303,6 +331,133 @@ class SimulationModel {
       totalBadges: badges.length,
       desbloqueadosCount,
       taxaConclusaoPercentual: Math.round((desbloqueadosCount / badges.length) * 100)
+    };
+  }
+
+  criarMetaLiberdade({ titulo, categoria, valorAlvo, valorAtual = 0 }) {
+    if (!titulo || !valorAlvo || Number(valorAlvo) <= 0) {
+      throw new Error('Titulo e valor alvo valido sao obrigatorios.');
+    }
+    const novaMeta = {
+      id: 'meta-' + Date.now(),
+      titulo: String(titulo).trim(),
+      categoria: categoria || 'Geral',
+      valorAlvo: Number(Number(valorAlvo).toFixed(2)),
+      valorAtual: Number(Number(valorAtual || 0).toFixed(2)),
+      dataCriacao: new Date().toISOString()
+    };
+    metasLiberdade.push(novaMeta);
+    return novaMeta;
+  }
+
+  getMetasProgresso(valorHoraInformado) {
+    let perfil;
+    try {
+      perfil = UserModel.getProfile();
+    } catch (e) {
+      perfil = { valorHora: 21.88, salario: 3500, jornadaSemanal: 40 };
+    }
+    const valorHora = Number(valorHoraInformado) || Number(perfil.valorHora) || 21.88;
+    const salario = Number(perfil.salario) || 3500;
+    const custoVidaDiario = Number((salario / 30).toFixed(2));
+
+    const dadosScore = this.getHealthScore();
+    const dinheiroPoupadoGeral = Number(dadosScore.dinheiroPoupado || 0);
+
+    const metasFormatadas = metasLiberdade.map(meta => {
+      const valorAlvo = Number(meta.valorAlvo);
+      const valorAtual = Number(meta.valorAtual);
+      const restante = Math.max(0, valorAlvo - valorAtual);
+      const progressoPct = Math.min(100, Math.round((valorAtual / valorAlvo) * 100));
+
+      const horasTrabalhoAlvo = Number((valorAlvo / valorHora).toFixed(1));
+      const horasTrabalhoAtuais = Number((valorAtual / valorHora).toFixed(1));
+      const horasTrabalhoRestantes = Number((restante / valorHora).toFixed(1));
+      const diasTrabalhoRestantes = Number((horasTrabalhoRestantes / 8).toFixed(1));
+
+      const diasLiberdadeConquistados = custoVidaDiario > 0 ? Number((valorAtual / custoVidaDiario).toFixed(1)) : 0;
+      const diasLiberdadeAlvo = custoVidaDiario > 0 ? Number((valorAlvo / custoVidaDiario).toFixed(1)) : 0;
+
+      return {
+        id: meta.id,
+        titulo: meta.titulo,
+        categoria: meta.categoria,
+        valorAlvo,
+        valorAtual,
+        restante,
+        progressoPct,
+        horasTrabalhoAlvo,
+        horasTrabalhoAtuais,
+        horasTrabalhoRestantes,
+        diasTrabalhoRestantes,
+        diasLiberdadeConquistados,
+        diasLiberdadeAlvo,
+        concluida: valorAtual >= valorAlvo
+      };
+    });
+
+    const totalAlvoMetas = Number(metasFormatadas.reduce((acc, curr) => acc + curr.valorAlvo, 0).toFixed(2));
+    const totalAtualMetas = Number(metasFormatadas.reduce((acc, curr) => acc + curr.valorAtual, 0).toFixed(2));
+    const totalRestanteMetas = Math.max(0, totalAlvoMetas - totalAtualMetas);
+    const progressoGeralPct = totalAlvoMetas > 0 ? Math.round((totalAtualMetas / totalAlvoMetas) * 100) : 0;
+
+    const totalDiasLiberdade = custoVidaDiario > 0 ? Number((totalAtualMetas / custoVidaDiario).toFixed(1)) : 0;
+    const totalHorasVidaPoupadasMetas = Number((totalAtualMetas / valorHora).toFixed(1));
+    const totalDiasTrabalhoRestantesGeral = Number(((totalRestanteMetas / valorHora) / 8).toFixed(1));
+
+    return {
+      resumoGeral: {
+        totalMetas: metasFormatadas.length,
+        totalAlvo: totalAlvoMetas,
+        totalAcumulado: totalAtualMetas,
+        totalRestante: totalRestanteMetas,
+        progressoGeralPct,
+        diasLiberdadeConquistados: totalDiasLiberdade,
+        horasVidaPoupadas: totalHorasVidaPoupadasMetas,
+        diasTrabalhoRestantes: totalDiasTrabalhoRestantesGeral,
+        dinheiroPoupadoCooldown: dinheiroPoupadoGeral,
+        custoVidaDiarioReferencia: custoVidaDiario,
+        valorHoraReferencia: valorHora
+      },
+      metas: metasFormatadas
+    };
+  }
+
+  aportarNaMeta(metaId, valor) {
+    const meta = metasLiberdade.find(m => m.id === metaId);
+    if (!meta) {
+      throw new Error('Meta nao encontrada.');
+    }
+    const aporte = Number(valor);
+    if (isNaN(aporte) || aporte <= 0) {
+      throw new Error('Valor de aporte invalido.');
+    }
+    meta.valorAtual = Number((meta.valorAtual + aporte).toFixed(2));
+    return meta;
+  }
+
+  simularImpactoPoupanca(valorPoupado, valorHoraInformado) {
+    let perfil;
+    try {
+      perfil = UserModel.getProfile();
+    } catch (e) {
+      perfil = { valorHora: 21.88, salario: 3500 };
+    }
+    const valorHora = Number(valorHoraInformado) || Number(perfil.valorHora) || 21.88;
+    const salario = Number(perfil.salario) || 3500;
+    const custoVidaDiario = Number((salario / 30).toFixed(2));
+
+    const valor = Number(valorPoupado) || 0;
+    const horasTrabalhoPoupadas = Number((valor / valorHora).toFixed(1));
+    const diasUteisPoupados = Number((horasTrabalhoPoupadas / 8).toFixed(1));
+    const diasLiberdadeGanhos = custoVidaDiario > 0 ? Number((valor / custoVidaDiario).toFixed(1)) : 0;
+
+    return {
+      valorSimulado: valor,
+      horasTrabalhoPoupadas,
+      diasUteisPoupados,
+      diasLiberdadeGanhos,
+      mensagem: 'Ao desistir ou economizar R$ ' + valor.toFixed(2) + ', voce antecipa suas metas em ' + diasLiberdadeGanhos + ' dias de liberdade financeira sem trabalhar.'
     };
   }
 }

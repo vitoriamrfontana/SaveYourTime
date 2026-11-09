@@ -448,6 +448,18 @@ export const createExtendedCooldown = (dados) =>
 
 // Fogo da Disciplina: dias seguidos sem compra por impulso
 export const getDisciplineStreak = () => request('/cooldown/streak');
+
+// Sprint 4 - Antirrecaída: freio de emergência. Tudo opcional:
+// { gatilho, desejoId, valor }. Trava o registro de compras por 30 min e
+// devolve a respiração guiada e as mensagens de impacto financeiro.
+export const triggerCooldownPanicMode = (dados = {}) =>
+  request('/cooldown/panic-mode', {
+    method: 'POST',
+    body: JSON.stringify(dados),
+  });
+
+// Auditoria final: gatilhos superados, conversão x desistência e maturidade
+export const getCooldownTriggersAnalytics = () => request('/cooldown/analytics/triggers');
 export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
 
 export const checkPurchaseBudgetImpact = (valor, categoria) =>
@@ -702,6 +714,14 @@ export const ApiService = {
 
   getDisciplineStreak: async () => {
     return getDisciplineStreak();
+  },
+
+  triggerCooldownPanicMode: async (dados) => {
+    return triggerCooldownPanicMode(dados);
+  },
+
+  getCooldownTriggersAnalytics: async () => {
+    return getCooldownTriggersAnalytics();
   },
 
   // Sprint 4 - Detox: aceita um objeto com os campos novos (valorCobrado, ciclo,

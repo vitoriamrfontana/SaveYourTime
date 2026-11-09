@@ -22,6 +22,16 @@
  *   5. Streak de Disciplina - dias contínuos sem compras por impulso (compra
  *      registrada antes de a quarentena terminar).
  *
+ * Sprint 4 - Antirrecaída:
+ *
+ *   6. Freio de emergência - no pico da tentação, trava o registro de compras
+ *      por 30 minutos e devolve a respiração guiada 4-7-8 e o impacto da
+ *      compra na renda. Desistir continua liberado.
+ *   7. Auditoria final dos gatilhos - cada desejo pode levar o gatilho que o
+ *      motivou (tédio, ansiedade, promoção relâmpago ou necessidade genuína);
+ *      o relatório cruza gatilho x desfecho e calcula a Maturidade
+ *      Comportamental.
+ *
  * O perfil do usuário (salário / valor-hora) entra por parâmetro, vindo do
  * controller, para não acoplar este model ao userModel.
  */
@@ -94,6 +104,89 @@ const DIAS_STREAK_DEMO = 14;
 
 const CATEGORIAS = ['eletronicos', 'vestuario', 'lazer', 'casa', 'outros'];
 const CATEGORIA_PADRAO = 'outros';
+
+// Gatilho que motivou o desejo. Só os emocionais entram na rosca de "superados".
+const GATILHOS = [
+  { chave: 'tedio', rotulo: 'Tédio', emocional: true, descricao: 'Para passar o tempo' },
+  { chave: 'ansiedade', rotulo: 'Ansiedade', emocional: true, descricao: 'Para aliviar o estresse' },
+  {
+    chave: 'promocao_relampago',
+    rotulo: 'Promoção relâmpago',
+    emocional: true,
+    descricao: 'Urgência de desconto',
+  },
+  {
+    chave: 'necessidade_genuina',
+    rotulo: 'Necessidade genuína',
+    emocional: false,
+    descricao: 'Resolve um problema real',
+  },
+];
+const CHAVES_GATILHO = GATILHOS.map((g) => g.chave);
+
+// Frase de contra-argumento do freio para cada gatilho
+const REFLEXAO_GATILHO = {
+  tedio: 'Tédio passa em minutos; a parcela fica por meses. Troque a compra por 10 minutos de outra coisa.',
+  ansiedade: 'Comprar alivia a ansiedade por pouco tempo. A conta chega quando o alívio já passou.',
+  promocao_relampago: 'A pressa é a estratégia da loja. Se o preço for bom de verdade, ele volta.',
+  necessidade_genuina: 'Se é necessidade real, ela continua real daqui a 30 minutos. Compare antes.',
+};
+
+// Freio de emergência: quanto tempo o registro de compras fica travado
+const FREIO_DURACAO_MINUTOS = 30;
+const MS_POR_MINUTO = 60 * 1000;
+
+const RESPIRACAO = {
+  tecnica: '4-7-8',
+  ciclos: 4,
+  etapas: [
+    { fase: 'inspire', segundos: 4, instrucao: 'Inspire pelo nariz' },
+    { fase: 'segure', segundos: 7, instrucao: 'Segure o ar' },
+    { fase: 'expire', segundos: 8, instrucao: 'Solte o ar pela boca, devagar' },
+  ],
+};
+
+/**
+ * Níveis da Maturidade Comportamental, do primeiro ao último. O usuário fica
+ * no nível mais alto cujos dois mínimos (pontos e decisões) ele atinge.
+ */
+const NIVEIS_MATURIDADE = [
+  {
+    chave: 'em_observacao',
+    titulo: 'Em observação',
+    descricao: 'Ainda há poucas decisões registradas para medir o seu padrão.',
+    minPontos: 0,
+    minDecisoes: 0,
+  },
+  {
+    chave: 'reativo',
+    titulo: 'Reativo',
+    descricao: 'Os gatilhos ainda decidem por você na maioria das vezes.',
+    minPontos: 0,
+    minDecisoes: 3,
+  },
+  {
+    chave: 'despertar',
+    titulo: 'Despertar',
+    descricao: 'Você já percebe os gatilhos e começa a resistir a eles.',
+    minPontos: 40,
+    minDecisoes: 3,
+  },
+  {
+    chave: 'consciente',
+    titulo: 'Consumidor consciente',
+    descricao: 'A maior parte das suas decisões passa pela reflexão antes da compra.',
+    minPontos: 60,
+    minDecisoes: 5,
+  },
+  {
+    chave: 'mestre',
+    titulo: 'Mestre do autocontrole',
+    descricao: 'Os impulsos passam e o dinheiro fica. Disciplina consolidada.',
+    minPontos: 80,
+    minDecisoes: 10,
+  },
+];
 
 // Frequência de uso declarada no questionário -> pontos de risco
 const USOS_PREVISTOS = { diario: 0, semanal: 3, raro: 6 };
@@ -180,6 +273,8 @@ let desejos = [];
 let auditoria = [];
 let proximoId = 1;
 let inicioDisciplina = new Date().toISOString();
+let freioBloqueadoAte = null;
+let acionamentosFreio = [];
 
 function arredondar(valor) {
   return Math.round(Number(valor || 0) * 100) / 100;
@@ -196,6 +291,14 @@ function horasAtras(horas) {
 
 function categoriaValida(categoria) {
   return CATEGORIAS.includes(categoria) ? categoria : CATEGORIA_PADRAO;
+}
+
+function gatilhoValido(chave) {
+  return CHAVES_GATILHO.includes(chave) ? chave : null;
+}
+
+function gatilhoPorChave(chave) {
+  return GATILHOS.find((g) => g.chave === chave) ?? null;
 }
 
 function periodoPorChave(chave) {
@@ -260,6 +363,9 @@ function normalizarDesejo(bruto) {
     criadoEm: bruto.criadoEm ?? new Date().toISOString(),
     periodo: periodoValido(bruto.periodo),
     quiz: normalizarQuiz(bruto.quiz),
+    gatilho: gatilhoValido(bruto.gatilho),
+    // Última vez que o freio de emergência foi acionado sobre este desejo
+    freadoEm: bruto.freadoEm ?? null,
     desfecho: bruto.desfecho ?? null,
   };
 }
@@ -273,6 +379,7 @@ function seedPadrao() {
       categoria: 'eletronicos',
       criadoEm: horasAtras(2),
       quiz: { necessidadeReal: false, usoPrevisto: 'raro', alternativas: 'O fone atual ainda funciona' },
+      gatilho: 'ansiedade',
     },
     {
       id: 2,
@@ -281,6 +388,7 @@ function seedPadrao() {
       categoria: 'vestuario',
       criadoEm: horasAtras(14),
       quiz: { necessidadeReal: true, usoPrevisto: 'semanal', alternativas: '' },
+      gatilho: 'necessidade_genuina',
     },
     {
       id: 3,
@@ -297,6 +405,7 @@ function seedPadrao() {
       categoria: 'lazer',
       criadoEm: horasAtras(52),
       quiz: { necessidadeReal: false, usoPrevisto: 'raro', alternativas: '' },
+      gatilho: 'tedio',
     },
     {
       id: 5,
@@ -306,6 +415,7 @@ function seedPadrao() {
       criadoEm: horasAtras(9 * 24),
       periodo: 'estendido',
       quiz: { necessidadeReal: false, usoPrevisto: 'semanal', alternativas: 'Upgrade de memória no atual' },
+      gatilho: 'promocao_relampago',
     },
     {
       id: 6,
@@ -327,6 +437,8 @@ function inicializar(seed = seedPadrao(), opcoes = {}) {
   proximoId = 1;
   desejos = seed.map(normalizarDesejo);
   auditoria = [];
+  freioBloqueadoAte = null;
+  acionamentosFreio = [];
 
   const maisAntigo = desejos.reduce(
     (menor, d) => (new Date(d.criadoEm) < new Date(menor) ? d.criadoEm : menor),
@@ -534,6 +646,7 @@ function montarItem(desejo, perfil, agora) {
     liberaEm: tempo.liberaEm,
     status: statusDe(desejo, tempo),
     quiz: desejo.quiz ? { ...desejo.quiz } : null,
+    gatilho: desejo.gatilho,
     horasSuor: risco.horasSuor,
     diasTrabalho: risco.diasTrabalho,
     risco,
@@ -591,8 +704,14 @@ function getResumo({ perfil = {}, agora = new Date() } = {}) {
   };
 }
 
-/** `periodo` é a chave da quarentena (curto | intermediario | estendido); padrão 48h. */
-function addItem({ item, preco, categoria, quiz, periodo }, { perfil = {}, agora = new Date() } = {}) {
+/**
+ * `periodo` é a chave da quarentena (curto | intermediario | estendido); padrão 48h.
+ * `gatilho` é opcional (uma das chaves de GATILHOS).
+ */
+function addItem(
+  { item, preco, categoria, quiz, periodo, gatilho },
+  { perfil = {}, agora = new Date() } = {}
+) {
   const novoDesejo = normalizarDesejo({
     id: proximoId,
     item,
@@ -600,6 +719,7 @@ function addItem({ item, preco, categoria, quiz, periodo }, { perfil = {}, agora
     categoria,
     periodo,
     quiz,
+    gatilho,
     criadoEm: paraIso(agora),
   });
 
@@ -607,13 +727,19 @@ function addItem({ item, preco, categoria, quiz, periodo }, { perfil = {}, agora
   return montarItem(novoDesejo, perfil, agora);
 }
 
-/** Salva/atualiza as respostas do questionário reflexivo e recalcula o score. */
+/**
+ * Salva/atualiza as respostas do questionário reflexivo e recalcula o score.
+ * O gatilho vem no mesmo corpo, mas é guardado à parte (não mexe no risco):
+ * ausente mantém o atual, null limpa.
+ */
 function responderQuiz(id, quiz, { perfil = {}, agora = new Date() } = {}) {
   const desejo = encontrar(id);
   if (!desejo) return null;
 
-  const respostas = normalizarQuiz({ ...(desejo.quiz ?? {}), ...quiz, respondidoEm: undefined });
+  const { gatilho, ...respostasQuiz } = quiz;
+  const respostas = normalizarQuiz({ ...(desejo.quiz ?? {}), ...respostasQuiz, respondidoEm: undefined });
   desejo.quiz = respostas;
+  if (gatilho !== undefined) desejo.gatilho = gatilhoValido(gatilho);
 
   return montarItem(desejo, perfil, agora);
 }
@@ -647,6 +773,8 @@ function registrarDesfecho(id, tipo, { perfil = {}, agora = new Date() } = {}) {
     horasDecorridas: snapshot.tempo.horasDecorridas,
     faseNoDesfecho: snapshot.tempo.fase.chave,
     concluiuCooldown: snapshot.tempo.concluido,
+    gatilho: desejo.gatilho,
+    aposFreio: Boolean(desejo.freadoEm),
   };
 
   auditoria.push({
@@ -738,6 +866,310 @@ function calcularStreakDisciplina({ agora = new Date() } = {}) {
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * 6. Freio de emergência (antirrecaída)
+ * ------------------------------------------------------------------ */
+
+function formatarReais(valor) {
+  return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function formatarNumeroBr(valor) {
+  return String(arredondar(valor)).replace('.', ',');
+}
+
+/** Estado do bloqueio de compras, com a contagem calculada para `agora`. */
+function getModoPanico({ agora = new Date() } = {}) {
+  const referencia = new Date(agora).getTime();
+  const bloqueioMs = freioBloqueadoAte ? new Date(freioBloqueadoAte).getTime() : 0;
+  const msRestantes = Math.max(bloqueioMs - referencia, 0);
+  const ativo = msRestantes > 0;
+  const ultimo = acionamentosFreio[acionamentosFreio.length - 1] ?? null;
+
+  return {
+    ativo,
+    bloqueadoAte: ativo ? freioBloqueadoAte : null,
+    segundosRestantes: Math.ceil(msRestantes / 1000),
+    duracaoMinutos: FREIO_DURACAO_MINUTOS,
+    totalAcionamentos: acionamentosFreio.length,
+    ultimoAcionamento: ultimo ? { ...ultimo } : null,
+  };
+}
+
+function compraBloqueada({ agora = new Date() } = {}) {
+  return getModoPanico({ agora }).ativo;
+}
+
+/**
+ * Valor de referência do impacto: o desejo escolhido, o valor informado ou,
+ * sem nenhum dos dois, tudo o que está na trava agora.
+ */
+function calcularImpactoFreio({ item, valor }, itensNaTrava, perfil) {
+  let origem = null;
+  let valorReferencia = null;
+
+  if (item) {
+    origem = 'desejo';
+    valorReferencia = item.preco;
+  } else if (Number(valor) > 0) {
+    origem = 'informado';
+    valorReferencia = arredondar(valor);
+  } else if (itensNaTrava.length > 0) {
+    origem = 'quarentena';
+    valorReferencia = arredondar(itensNaTrava.reduce((total, i) => total + i.preco, 0));
+  }
+
+  if (valorReferencia === null) {
+    return { origem: null, valorReferencia: null, horasTrabalho: null, diasTrabalho: null, percentualRenda: null };
+  }
+
+  const salario = Number(perfil.salario) || 0;
+  const valorHora = Number(perfil.valorHora) || 0;
+  const horasTrabalho = valorHora > 0 ? arredondar(valorReferencia / valorHora) : null;
+
+  return {
+    origem,
+    valorReferencia,
+    horasTrabalho,
+    diasTrabalho: horasTrabalho === null ? null : arredondar(horasTrabalho / HORAS_DIA_UTIL),
+    percentualRenda: salario > 0 ? arredondar((valorReferencia / salario) * 100) : null,
+  };
+}
+
+/** Mensagens reflexivas do freio. Cada `tipo` aparece no máximo uma vez. */
+function montarMensagensFreio({ impacto, gatilho, bloqueadoAte }) {
+  const mensagens = [];
+
+  if (impacto.horasTrabalho !== null) {
+    mensagens.push({
+      tipo: 'tempo',
+      texto: `${formatarReais(impacto.valorReferencia)} custam ${formatarNumeroBr(impacto.horasTrabalho)}h do seu trabalho (${formatarNumeroBr(impacto.diasTrabalho)} dias úteis).`,
+    });
+  }
+  if (impacto.percentualRenda !== null) {
+    mensagens.push({
+      tipo: 'renda',
+      texto: `Isso é ${formatarNumeroBr(impacto.percentualRenda)}% do seu salário do mês.`,
+    });
+  }
+  if (gatilho && REFLEXAO_GATILHO[gatilho]) {
+    mensagens.push({ tipo: 'gatilho', texto: REFLEXAO_GATILHO[gatilho] });
+  }
+
+  const { economiaTotal } = getAuditoria();
+  if (economiaTotal > 0) {
+    mensagens.push({
+      tipo: 'economia',
+      texto: `Você já poupou ${formatarReais(economiaTotal)} desistindo de impulsos. Não devolva isso agora.`,
+    });
+  }
+
+  const hora = new Date(bloqueadoAte).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  });
+  mensagens.push({
+    tipo: 'bloqueio',
+    texto: `Registrar compras na trava fica bloqueado até ${hora} (${FREIO_DURACAO_MINUTOS} min). Desistir continua liberado.`,
+  });
+
+  return mensagens;
+}
+
+/**
+ * Aciona o freio: (re)inicia o bloqueio de compras por FREIO_DURACAO_MINUTOS,
+ * marca o desejo escolhido (para medir depois se o freio levou à desistência)
+ * e devolve respiração guiada + impacto + mensagens.
+ *
+ * Retorna { erro: 'nao_encontrado' | 'encerrado' } quando o desejo não serve.
+ */
+function acionarFreio({ gatilho, desejoId, valor } = {}, { perfil = {}, agora = new Date() } = {}) {
+  let desejo = null;
+
+  if (desejoId !== undefined && desejoId !== null) {
+    desejo = encontrar(desejoId);
+    if (!desejo) return { erro: 'nao_encontrado' };
+    if (desejo.desfecho) return { erro: 'encerrado' };
+  }
+
+  const agoraIso = paraIso(agora);
+  const gatilhoInformado = gatilhoValido(gatilho);
+
+  if (desejo) {
+    desejo.freadoEm = agoraIso;
+    // O gatilho do momento de crise vale para o desejo que ainda não tinha um
+    if (gatilhoInformado && !desejo.gatilho) desejo.gatilho = gatilhoInformado;
+  }
+
+  freioBloqueadoAte = new Date(new Date(agora).getTime() + FREIO_DURACAO_MINUTOS * MS_POR_MINUTO).toISOString();
+  acionamentosFreio.push({
+    acionadoEm: agoraIso,
+    gatilho: gatilhoInformado,
+    desejoId: desejo ? desejo.id : null,
+  });
+
+  const item = desejo ? montarItem(desejo, perfil, agora) : null;
+  const impacto = calcularImpactoFreio({ item, valor }, getItems({ perfil, agora }), perfil);
+
+  return {
+    item,
+    gatilho: gatilhoInformado,
+    impacto,
+    mensagens: montarMensagensFreio({
+      impacto,
+      gatilho: gatilhoInformado ?? item?.gatilho ?? null,
+      bloqueadoAte: freioBloqueadoAte,
+    }),
+    respiracao: RESPIRACAO,
+    modoPanico: getModoPanico({ agora }),
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * 7. Auditoria final dos gatilhos + Maturidade Comportamental
+ * ------------------------------------------------------------------ */
+
+function percentual(parte, total) {
+  return total > 0 ? arredondar((parte / total) * 100) : 0;
+}
+
+/**
+ * Peso de cada decisão na Maturidade (0 a 1):
+ *   desistência = 1 | necessidade genuína comprada após a quarentena = 1
+ *   outra compra após a quarentena = 0,5 | compra por impulso = 0
+ */
+function pesoMaturidade(registro) {
+  if (registro.tipo === DESFECHOS.DESISTIU) return 1;
+  if (ehCompraImpulsiva(registro)) return 0;
+  return registro.gatilho === 'necessidade_genuina' ? 1 : 0.5;
+}
+
+function calcularMaturidade(registros) {
+  const totalDecisoes = registros.length;
+  const pesos = registros.map(pesoMaturidade);
+  const pontuacao =
+    totalDecisoes > 0 ? Math.round((pesos.reduce((s, p) => s + p, 0) / totalDecisoes) * 100) : 0;
+
+  let indice = 0;
+  NIVEIS_MATURIDADE.forEach((nivel, i) => {
+    if (pontuacao >= nivel.minPontos && totalDecisoes >= nivel.minDecisoes) indice = i;
+  });
+
+  const nivel = NIVEIS_MATURIDADE[indice];
+  const proximo = NIVEIS_MATURIDADE[indice + 1] ?? null;
+
+  return {
+    chave: nivel.chave,
+    titulo: nivel.titulo,
+    descricao: nivel.descricao,
+    estagio: indice + 1,
+    totalEstagios: NIVEIS_MATURIDADE.length,
+    pontuacao,
+    totalDecisoes,
+    decisoesMaduras: pesos.filter((p) => p === 1).length,
+    proximoNivel: proximo
+      ? {
+          chave: proximo.chave,
+          titulo: proximo.titulo,
+          faltamPontos: Math.max(proximo.minPontos - pontuacao, 0),
+          faltamDecisoes: Math.max(proximo.minDecisoes - totalDecisoes, 0),
+        }
+      : null,
+  };
+}
+
+function gerarInsights(porGatilho, conversao) {
+  const insights = [];
+  const emocionais = porGatilho.filter((g) => g.emocional);
+
+  const maisVencido = [...emocionais].sort((a, b) => b.desistencias - a.desistencias)[0];
+  if (maisVencido && maisVencido.desistencias > 0) {
+    insights.push(
+      `Gatilho que você mais venceu: ${maisVencido.rotulo.toLowerCase()} (${maisVencido.desistencias} desistência${maisVencido.desistencias === 1 ? '' : 's'}).`
+    );
+  }
+
+  const pontoFraco = [...emocionais].sort(
+    (a, b) => b.comprasImpulsivas + b.comprasConscientes - (a.comprasImpulsivas + a.comprasConscientes)
+  )[0];
+  const comprasPontoFraco = pontoFraco ? pontoFraco.comprasImpulsivas + pontoFraco.comprasConscientes : 0;
+  if (comprasPontoFraco > 0) {
+    insights.push(
+      `Ponto fraco: ${pontoFraco.rotulo.toLowerCase()} virou compra ${comprasPontoFraco} ${comprasPontoFraco === 1 ? 'vez' : 'vezes'}.`
+    );
+  }
+
+  if (conversao.aposFreio > 0) {
+    insights.push(
+      `Freio de emergência: ${conversao.desistenciasAposFreio} de ${conversao.aposFreio} desejos freados terminaram em desistência.`
+    );
+  }
+
+  return insights;
+}
+
+/** Relatório de GET /api/cooldown/analytics/triggers. */
+function getAnalyticsGatilhos() {
+  const registros = auditoria;
+  const desistiu = (r) => r.tipo === DESFECHOS.DESISTIU;
+
+  const porGatilho = GATILHOS.map((g) => {
+    const doGatilho = registros.filter((r) => r.gatilho === g.chave);
+    const desistencias = doGatilho.filter(desistiu);
+    const impulsivas = doGatilho.filter(ehCompraImpulsiva);
+
+    return {
+      chave: g.chave,
+      rotulo: g.rotulo,
+      emocional: g.emocional,
+      totalDecisoes: doGatilho.length,
+      desistencias: desistencias.length,
+      comprasConscientes: doGatilho.length - desistencias.length - impulsivas.length,
+      comprasImpulsivas: impulsivas.length,
+      valorPoupado: arredondar(desistencias.reduce((s, r) => s + (r.valorPoupado || 0), 0)),
+    };
+  });
+
+  const emocionais = porGatilho.filter((g) => g.emocional);
+  const totalSuperados = emocionais.reduce((s, g) => s + g.desistencias, 0);
+
+  const totalDecisoes = registros.length;
+  const desistencias = registros.filter(desistiu).length;
+  const comprasImpulsivas = registros.filter(ehCompraImpulsiva).length;
+  const freados = registros.filter((r) => r.aposFreio);
+
+  const conversao = {
+    totalDecisoes,
+    desistencias,
+    comprasConscientes: totalDecisoes - desistencias - comprasImpulsivas,
+    comprasImpulsivas,
+    taxaDesistencia: percentual(desistencias, totalDecisoes),
+    taxaConversao: percentual(totalDecisoes - desistencias, totalDecisoes),
+    aposFreio: freados.length,
+    desistenciasAposFreio: freados.filter(desistiu).length,
+  };
+
+  return {
+    superados: {
+      total: totalSuperados,
+      valorPoupado: arredondar(emocionais.reduce((s, g) => s + g.valorPoupado, 0)),
+      fatias: emocionais.map((g) => ({
+        chave: g.chave,
+        rotulo: g.rotulo,
+        quantidade: g.desistencias,
+        percentual: percentual(g.desistencias, totalSuperados),
+        valorPoupado: g.valorPoupado,
+      })),
+    },
+    conversao,
+    maturidade: calcularMaturidade(registros),
+    porGatilho,
+    insights: gerarInsights(porGatilho, conversao),
+    freio: { totalAcionamentos: acionamentosFreio.length },
+  };
+}
+
 inicializar(seedPadrao(), { inicioDisciplina: horasAtras(DIAS_STREAK_DEMO * 24) });
 
 module.exports = {
@@ -754,6 +1186,15 @@ module.exports = {
   periodoMaisCurto,
   calcularStreakDisciplina,
   ehCompraImpulsiva,
+  getModoPanico,
+  compraBloqueada,
+  acionarFreio,
+  calcularMaturidade,
+  getAnalyticsGatilhos,
+  GATILHOS,
+  CHAVES_GATILHO,
+  RESPIRACAO,
+  FREIO_DURACAO_MINUTOS,
   PERIODOS,
   CATEGORIAS,
   USOS_PREVISTOS,

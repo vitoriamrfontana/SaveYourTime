@@ -56,6 +56,15 @@ function validarQuiz(quiz) {
   }
 }
 
+// null é "sem gatilho" (o usuário pode limpar a resposta)
+function validarGatilho(gatilho) {
+  if (gatilho !== undefined && gatilho !== null && !cooldownModel.CHAVES_GATILHO.includes(gatilho)) {
+    throw ApiError.badRequest(
+      `O campo 'gatilho' deve ser um destes: ${cooldownModel.CHAVES_GATILHO.join(", ")}.`
+    );
+  }
+}
+
 function validarPeriodo(periodo) {
   const chaves = cooldownModel.PERIODOS.map((p) => p.chave);
   if (periodo !== undefined && !chaves.includes(periodo)) {
@@ -80,6 +89,8 @@ const listItems = asyncHandler(async (req, res) => {
     categorias: cooldownModel.CATEGORIAS,
     marcos: cooldownModel.MARCOS,
     periodos: cooldownModel.PERIODOS,
+    gatilhos: cooldownModel.GATILHOS,
+    modoPanico: cooldownModel.getModoPanico(ctx),
   });
 });
 
@@ -99,12 +110,13 @@ const getItem = asyncHandler(async (req, res) => {
 // POST /api/cooldown
 // Entra na quarentena já com o questionário reflexivo (se respondido no modal)
 const createItem = asyncHandler(async (req, res) => {
-  const { item, preco, categoria, quiz } = req.body;
+  const { item, preco, categoria, quiz, gatilho } = req.body;
   validarNovoDesejo({ item, preco, categoria });
+  validarGatilho(gatilho);
   if (quiz !== undefined) validarQuiz(quiz);
 
   const ctx = contexto();
-  const novoItem = cooldownModel.addItem({ item, preco, categoria, quiz }, ctx);
+  const novoItem = cooldownModel.addItem({ item, preco, categoria, quiz, gatilho }, ctx);
 
   return apiResponse(res, 201, { item: novoItem, resumo: cooldownModel.getResumo(ctx) });
 });
@@ -114,9 +126,10 @@ const createItem = asyncHandler(async (req, res) => {
 // salário. Sem 'periodo' no corpo, aplica o sugerido; o usuário pode alongar
 // a reflexão, mas não encurtar abaixo do sugerido.
 const criarCooldownEstendido = asyncHandler(async (req, res) => {
-  const { item, preco, categoria, quiz, periodo } = req.body;
+  const { item, preco, categoria, quiz, periodo, gatilho } = req.body;
   validarNovoDesejo({ item, preco, categoria });
   validarPeriodo(periodo);
+  validarGatilho(gatilho);
   if (quiz !== undefined) validarQuiz(quiz);
 
   const ctx = contexto();
@@ -130,7 +143,7 @@ const criarCooldownEstendido = asyncHandler(async (req, res) => {
   }
 
   const novoItem = cooldownModel.addItem(
-    { item, preco, categoria, quiz, periodo: periodoEscolhido },
+    { item, preco, categoria, quiz, periodo: periodoEscolhido, gatilho },
     ctx
   );
 
@@ -153,6 +166,7 @@ const responderQuiz = asyncHandler(async (req, res) => {
   const { id } = req.params;
   validarId(id);
   validarQuiz(req.body);
+  validarGatilho(req.body.gatilho);
 
   const ctx = contexto();
   const itemAtualizado = cooldownModel.responderQuiz(id, req.body, ctx);
@@ -174,6 +188,16 @@ function encerrarCom(tipoDesfecho) {
     validarId(id);
 
     const ctx = contexto();
+
+    // Freio de emergência ativo: comprar fica travado, desistir não
+    if (tipoDesfecho === cooldownModel.DESFECHOS.COMPROU && cooldownModel.compraBloqueada(ctx)) {
+      const { segundosRestantes } = cooldownModel.getModoPanico(ctx);
+      throw new ApiError(
+        423,
+        `Freio de emergência ativo: registrar compras libera em ${Math.ceil(segundosRestantes / 60)} min. Desistir continua liberado.`
+      );
+    }
+
     const resultado = cooldownModel.registrarDesfecho(id, tipoDesfecho, ctx);
 
     if (!resultado) {
@@ -206,6 +230,35 @@ const getAuditoria = asyncHandler(async (req, res) => {
   return apiResponse(res, 200, cooldownModel.getAuditoria());
 });
 
+// POST /api/cooldown/panic-mode
+// Freio de emergência. Corpo todo opcional: { gatilho, desejoId, valor }
+const acionarModoPanico = asyncHandler(async (req, res) => {
+  const { gatilho, desejoId, valor } = req.body ?? {};
+  validarGatilho(gatilho);
+  if (desejoId !== undefined && desejoId !== null) validarId(desejoId);
+  if (valor !== undefined && valor !== null && (isNaN(Number(valor)) || Number(valor) < 0)) {
+    throw ApiError.badRequest("O campo 'valor' deve ser um número maior ou igual a zero.");
+  }
+
+  const ctx = contexto();
+  const resultado = cooldownModel.acionarFreio({ gatilho, desejoId, valor }, ctx);
+
+  if (resultado.erro === "nao_encontrado") {
+    throw ApiError.notFound(`Desejo com id ${desejoId} não encontrado.`);
+  }
+  if (resultado.erro === "encerrado") {
+    throw ApiError.badRequest(`A quarentena do desejo ${desejoId} já foi encerrada.`);
+  }
+
+  return apiResponse(res, 200, resultado);
+});
+
+// GET /api/cooldown/analytics/triggers
+// Auditoria final: gatilhos superados, conversão x desistência e maturidade
+const getAnalyticsGatilhos = asyncHandler(async (req, res) => {
+  return apiResponse(res, 200, cooldownModel.getAnalyticsGatilhos());
+});
+
 module.exports = {
   listItems,
   getItem,
@@ -216,4 +269,6 @@ module.exports = {
   registrarDesistencia,
   registrarCompra,
   getAuditoria,
+  acionarModoPanico,
+  getAnalyticsGatilhos,
 };

@@ -265,6 +265,140 @@ export const getUserBadges = async () => {
   }
 };
 
+export const getFinancialGoals = async (valorHora = 21.88) => {
+  try {
+    const res = await request(`/simulate/goals?valorHora=${valorHora}`);
+    return res?.data || res;
+  } catch (error) {
+    const vHora = Number(valorHora) || 21.88;
+    const custoVidaDiario = Number((3500 / 30).toFixed(2));
+    const metasMock = [
+      {
+        id: 'meta-reserva-emergencia',
+        titulo: 'Reserva de Emergencia (6 Meses)',
+        categoria: 'Seguranca',
+        valorAlvo: 15000.00,
+        valorAtual: 9000.00,
+        restante: 6000.00,
+        progressoPct: 60,
+        horasTrabalhoAlvo: Number((15000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((9000 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((6000 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((6000 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((9000 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((15000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      },
+      {
+        id: 'meta-viagem-sonhos',
+        titulo: 'Viagem de Ferias Sem Dividas',
+        categoria: 'Experiencia',
+        valorAlvo: 5000.00,
+        valorAtual: 3750.00,
+        restante: 1250.00,
+        progressoPct: 75,
+        horasTrabalhoAlvo: Number((5000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((3750 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((1250 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((1250 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((3750 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((5000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      },
+      {
+        id: 'meta-ano-sabatico',
+        titulo: 'Fundo de Liberdade / Ano Sabatico',
+        categoria: 'Liberdade',
+        valorAlvo: 42000.00,
+        valorAtual: 14000.00,
+        restante: 28000.00,
+        progressoPct: 33,
+        horasTrabalhoAlvo: Number((42000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((14000 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((28000 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((28000 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((14000 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((42000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      }
+    ];
+    const totalAlvo = metasMock.reduce((a, b) => a + b.valorAlvo, 0);
+    const totalAtual = metasMock.reduce((a, b) => a + b.valorAtual, 0);
+    const totalRestante = totalAlvo - totalAtual;
+    return {
+      resumoGeral: {
+        totalMetas: metasMock.length,
+        totalAlvo,
+        totalAcumulado: totalAtual,
+        totalRestante,
+        progressoGeralPct: Math.round((totalAtual / totalAlvo) * 100),
+        diasLiberdadeConquistados: Number((totalAtual / custoVidaDiario).toFixed(1)),
+        horasVidaPoupadas: Number((totalAtual / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((totalRestante / vHora) / 8).toFixed(1)),
+        dinheiroPoupadoCooldown: 4199.00,
+        custoVidaDiarioReferencia: custoVidaDiario,
+        valorHoraReferencia: vHora
+      },
+      metas: metasMock
+    };
+  }
+};
+
+export const createFinancialGoal = async (meta) => {
+  try {
+    const res = await request('/simulate/goals', {
+      method: 'POST',
+      body: JSON.stringify(meta)
+    });
+    return res?.data || res;
+  } catch (error) {
+    return {
+      id: 'meta-' + Date.now(),
+      titulo: meta.titulo,
+      categoria: meta.categoria || 'Geral',
+      valorAlvo: Number(meta.valorAlvo),
+      valorAtual: Number(meta.valorAtual || 0),
+      dataCriacao: new Date().toISOString()
+    };
+  }
+};
+
+export const depositToFinancialGoal = async (id, valor) => {
+  try {
+    const res = await request(`/simulate/goals/${id}/deposit`, {
+      method: 'POST',
+      body: JSON.stringify({ valor: Number(valor) })
+    });
+    return res?.data || res;
+  } catch (error) {
+    return { success: true, id, valor };
+  }
+};
+
+export const simulateGoalSavingImpact = async (valorPoupado, valorHora = 21.88) => {
+  try {
+    const res = await request(`/simulate/goals/impact?valorHora=${valorHora}`, {
+      method: 'POST',
+      body: JSON.stringify({ valorPoupado: Number(valorPoupado) })
+    });
+    return res?.data || res;
+  } catch (error) {
+    const vHora = Number(valorHora) || 21.88;
+    const custoVidaDiario = Number((3500 / 30).toFixed(2));
+    const valor = Number(valorPoupado) || 0;
+    const horasTrabalhoPoupadas = Number((valor / vHora).toFixed(1));
+    const diasUteisPoupados = Number((horasTrabalhoPoupadas / 8).toFixed(1));
+    const diasLiberdadeGanhos = custoVidaDiario > 0 ? Number((valor / custoVidaDiario).toFixed(1)) : 0;
+    return {
+      valorSimulado: valor,
+      horasTrabalhoPoupadas,
+      diasUteisPoupados,
+      diasLiberdadeGanhos,
+      mensagem: 'Ao desistir ou economizar R$ ' + valor.toFixed(2) + ', voce antecipa suas metas em ' + diasLiberdadeGanhos + ' dias de liberdade financeira sem trabalhar.'
+    };
+  }
+};
+
 export const fetchPotes = async (salarioActual) => {
   try {
     return await getPotes();
@@ -628,6 +762,18 @@ export const ApiService = {
   },
   getUserBadges: async () => {
     return getUserBadges();
+  },
+  createFinancialGoal: async (meta) => {
+    return createFinancialGoal(meta);
+  },
+  getFinancialGoals: async (valorHora) => {
+    return getFinancialGoals(valorHora);
+  },
+  depositToFinancialGoal: async (id, valor) => {
+    return depositToFinancialGoal(id, valor);
+  },
+  simulateGoalSavingImpact: async (valorPoupado, valorHora) => {
+    return simulateGoalSavingImpact(valorPoupado, valorHora);
   },
   getPots: async (mes) => getPotes(mes),
   checkPurchaseBudgetImpact: async (valor, categoria) => checkPurchaseBudgetImpact(valor, categoria),

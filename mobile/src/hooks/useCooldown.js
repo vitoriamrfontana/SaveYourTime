@@ -9,6 +9,9 @@
  *
  * Sprint 3: quarentenas proporcionais (48h / 7 dias / 30 dias) e o streak
  * de disciplina (dias seguidos sem compra por impulso).
+ *
+ * Sprint 4: freio de emergência (bloqueio de compras com contagem ao vivo),
+ * gatilho de cada desejo e o relatório da auditoria final dos gatilhos.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,6 +61,15 @@ export function sugerirPeriodo(preco, salario, periodos = []) {
   return periodos.find((p) => percentual > p.percentualRendaAcimaDe) ?? padrao;
 }
 
+const PANICO_INICIAL = {
+  ativo: false,
+  bloqueadoAte: null,
+  segundosRestantes: 0,
+  duracaoMinutos: 30,
+  totalAcionamentos: 0,
+  ultimoAcionamento: null,
+};
+
 const AUDITORIA_INICIAL = {
   registros: [],
   totalDecisoes: 0,
@@ -98,6 +110,9 @@ export function useCooldown() {
   const [categorias, setCategorias] = useState([]);
   const [periodos, setPeriodos] = useState([]);
   const [streak, setStreak] = useState(STREAK_INICIAL);
+  const [gatilhos, setGatilhos] = useState([]);
+  const [modoPanico, setModoPanico] = useState(PANICO_INICIAL);
+  const [analytics, setAnalytics] = useState(null);
   const [perfil, setPerfil] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -108,11 +123,13 @@ export function useCooldown() {
   const fetchData = useCallback(async ({ silent = false } = {}) => {
     try {
       if (!silent) setError(null);
-      const [dados, dadosAuditoria, dadosPerfil, dadosStreak] = await Promise.all([
+      const [dados, dadosAuditoria, dadosPerfil, dadosStreak, dadosAnalytics] = await Promise.all([
         ApiService.getCooldownItems(),
         ApiService.getCooldownAudit(),
         ApiService.getUserProfile(),
         ApiService.getDisciplineStreak(),
+        // O relatório é complementar: se falhar, a trava continua funcionando
+        ApiService.getCooldownTriggersAnalytics().catch(() => null),
       ]);
 
       // Blinda contra payload fora do formato esperado (ex.: uma versão
@@ -122,6 +139,9 @@ export function useCooldown() {
       setCategorias(Array.isArray(dados?.categorias) ? dados.categorias : []);
       setPeriodos(Array.isArray(dados?.periodos) ? dados.periodos : []);
       setStreak({ ...STREAK_INICIAL, ...(dadosStreak ?? {}) });
+      setGatilhos(Array.isArray(dados?.gatilhos) ? dados.gatilhos : []);
+      setModoPanico({ ...PANICO_INICIAL, ...(dados?.modoPanico ?? {}) });
+      setAnalytics(dadosAnalytics ?? null);
       setAuditoria({ ...AUDITORIA_INICIAL, ...(dadosAuditoria ?? {}) });
       setPerfil(dadosPerfil ?? null);
       setAgora(Date.now());
@@ -137,8 +157,13 @@ export function useCooldown() {
     fetchData();
   }, [fetchData]);
 
-  // Cronômetro: só roda enquanto existe algum desejo ainda em contagem
-  const temContagemAtiva = items.some((i) => i.status === STATUS.EM_ESPERA);
+  // Bloqueio do freio de emergência, recalculado no cliente a cada tique
+  const bloqueioAteMs = modoPanico.bloqueadoAte ? new Date(modoPanico.bloqueadoAte).getTime() : 0;
+  const segundosBloqueio = Math.max(Math.ceil((bloqueioAteMs - agora) / 1000), 0);
+  const freioAtivo = segundosBloqueio > 0;
+
+  // Cronômetro: só roda enquanto existe algum desejo em contagem ou freio ativo
+  const temContagemAtiva = items.some((i) => i.status === STATUS.EM_ESPERA) || freioAtivo;
 
   useEffect(() => {
     if (!temContagemAtiva) return undefined;
@@ -196,9 +221,16 @@ export function useCooldown() {
 
   // Sempre pela rota estendida: o back-end valida o período mínimo pelo valor
   const adicionarDesejo = useCallback(
-    ({ item, preco, categoria, quiz, periodo }) =>
+    ({ item, preco, categoria, quiz, periodo, gatilho }) =>
       executarAcao(() =>
-        ApiService.createExtendedCooldown({ item, preco: Number(preco), categoria, quiz, periodo })
+        ApiService.createExtendedCooldown({
+          item,
+          preco: Number(preco),
+          categoria,
+          quiz,
+          periodo,
+          gatilho: gatilho ?? undefined,
+        })
       ),
     [executarAcao]
   );
@@ -219,6 +251,32 @@ export function useCooldown() {
     [executarAcao]
   );
 
+  /**
+   * Freio de emergência: trava o registro de compras e devolve a respiração
+   * guiada e as mensagens de impacto. `gatilho` e `desejoId` são opcionais.
+   */
+  const acionarFreio = useCallback(
+    ({ gatilho, desejoId } = {}) =>
+      executarAcao(() =>
+        ApiService.triggerCooldownPanicMode({
+          gatilho: gatilho ?? undefined,
+          desejoId: desejoId ?? undefined,
+        })
+      ),
+    [executarAcao]
+  );
+
+  const freio = useMemo(
+    () => ({
+      ativo: freioAtivo,
+      segundosRestantes: segundosBloqueio,
+      bloqueadoAte: freioAtivo ? modoPanico.bloqueadoAte : null,
+      duracaoMinutos: modoPanico.duracaoMinutos,
+      totalAcionamentos: modoPanico.totalAcionamentos,
+    }),
+    [freioAtivo, segundosBloqueio, modoPanico]
+  );
+
   return {
     items: itens,
     resumo,
@@ -226,6 +284,9 @@ export function useCooldown() {
     categorias,
     periodos,
     streak,
+    gatilhos,
+    analytics,
+    freio,
     perfil,
     loading,
     refreshing,
@@ -235,5 +296,6 @@ export function useCooldown() {
     adicionarDesejo,
     responderQuiz,
     registrarDesfecho,
+    acionarFreio,
   };
 }

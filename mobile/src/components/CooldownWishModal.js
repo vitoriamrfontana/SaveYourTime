@@ -9,6 +9,10 @@
  *
  * Sprint 3: no modo "novo", o período de reflexão (48h / 7 dias / 30 dias) é
  * sugerido conforme o preço digitado. Dá para alongar, nunca encurtar.
+ *
+ * Sprint 4: pergunta o gatilho da vontade (tédio, ansiedade, promoção
+ * relâmpago ou necessidade genuína), que alimenta a auditoria final. Não
+ * entra no score de impulso.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -26,6 +30,7 @@ import {
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { sugerirPeriodo } from '../hooks/useCooldown';
+import { GATILHOS_PADRAO, corDoGatilho } from '../utils/antirrecaida';
 
 const CATEGORIA_ROTULOS = {
   eletronicos: 'Eletrônicos',
@@ -49,6 +54,7 @@ const ESTADO_INICIAL = {
   usoPrevisto: null,
   alternativas: '',
   periodo: null, // null = seguir o sugerido
+  gatilho: null,
 };
 
 function paraNumero(texto) {
@@ -62,6 +68,7 @@ export default function CooldownWishModal({
   item = null,
   categorias = [],
   periodos = [],
+  gatilhos = [],
   salario,
   valorHora,
   salvando = false,
@@ -87,8 +94,11 @@ export default function CooldownWishModal({
       necessidadeReal: item?.quiz?.necessidadeReal ?? null,
       usoPrevisto: item?.quiz?.usoPrevisto ?? null,
       alternativas: item?.quiz?.alternativas ?? '',
+      gatilho: item?.gatilho ?? null,
     });
   }, [visible, item]);
+
+  const opcoesGatilho = gatilhos.length > 0 ? gatilhos : GATILHOS_PADRAO;
 
   const atualizar = (campo, valor) => setForm((atual) => ({ ...atual, [campo]: valor }));
 
@@ -120,12 +130,17 @@ export default function CooldownWishModal({
 
   const enviar = () => {
     if (somenteQuiz) {
-      if (form.necessidadeReal === null && form.usoPrevisto === null && !form.alternativas.trim()) {
+      if (
+        form.gatilho === null &&
+        form.necessidadeReal === null &&
+        form.usoPrevisto === null &&
+        !form.alternativas.trim()
+      ) {
         setErroLocal('Responda pelo menos uma pergunta do questionário.');
         return;
       }
       setErroLocal(null);
-      onSalvar?.({ quiz: montarQuiz() });
+      onSalvar?.({ quiz: montarQuiz(), gatilho: form.gatilho });
       return;
     }
 
@@ -145,6 +160,7 @@ export default function CooldownWishModal({
       categoria: form.categoria,
       quiz: montarQuiz(),
       periodo: periodoEfetivo?.chave,
+      gatilho: form.gatilho,
     });
   };
 
@@ -258,6 +274,31 @@ export default function CooldownWishModal({
             )}
 
             <Text style={styles.secao}>Antes de decidir, responda</Text>
+
+            <Text style={styles.label}>O que despertou essa vontade?</Text>
+            <View style={styles.chips}>
+              {opcoesGatilho.map((gatilho) => {
+                const ativa = form.gatilho === gatilho.chave;
+                return (
+                  <TouchableOpacity
+                    key={gatilho.chave}
+                    style={[styles.chip, styles.chipGatilho, ativa && styles.chipAtivo]}
+                    // Tocar de novo desmarca
+                    onPress={() => atualizar('gatilho', ativa ? null : gatilho.chave)}
+                    accessibilityState={{ selected: ativa }}
+                  >
+                    <View style={[styles.pontoGatilho, { backgroundColor: corDoGatilho(gatilho.chave) }]} />
+                    <Text style={[styles.chipTexto, ativa && styles.chipTextoAtivo]}>
+                      {gatilho.rotulo}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.dica}>
+              Não muda o risco de impulso: serve para a auditoria mostrar quais gatilhos você mais
+              vence.
+            </Text>
 
             <Text style={styles.label}>É uma necessidade real?</Text>
             <View style={styles.chips}>
@@ -428,6 +469,16 @@ const styles = StyleSheet.create({
   },
   chipTravado: {
     opacity: 0.35,
+  },
+  chipGatilho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pontoGatilho: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
   },
   chipTexto: {
     color: colors.textSecondary,

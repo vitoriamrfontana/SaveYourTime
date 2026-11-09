@@ -13,21 +13,38 @@ const CATEGORIAS = {
     chave: 'sobrevivencia',
     nome: 'Necessidades',
     percentual: 0.5,
+    tipoMeta: 'teto',
   },
   estiloVida: {
     chave: 'estiloVida',
     nome: 'Estilo de Vida',
     percentual: 0.3,
+    tipoMeta: 'teto',
   },
   dividas: {
     chave: 'dividas',
     nome: 'Dívidas / Investimentos',
     percentual: 0.2,
+    // Na regra 50-30-20, 50% e 30% são tetos de gasto; os 20% são um piso
+    // (quanto o usuário deve destinar à reserva / quitação de dívidas).
+    tipoMeta: 'piso',
   },
 };
 
+// Pote que recebe as sobras no reequilíbrio (reserva de segurança).
+const POTE_RESERVA = 'dividas';
+
+// Folga, em pontos percentuais do salário, tolerada no diagnóstico mensal.
+const TOLERANCIA_PP = 0.5;
+
 let lancamentos = [];
 let proximoId = 1;
+
+// Fechamento de competência e reequilíbrio (também em memória, como o restante).
+let fechamentos = {};
+let ajustesPorMes = {};
+let transferencias = [];
+let proximoIdTransferencia = 1;
 
 function arredondar(valor) {
   return Number(Number(valor || 0).toFixed(2));
@@ -132,8 +149,9 @@ function calcularProjecaoDia(limite, gasto, burnRate, diasNoMes, diasDecorridos)
   return diaProjetado <= diasNoMes ? diaProjetado : null;
 }
 
-function criarResumoPote(config, salario, lancamentosMes, diasNoMes, diasDecorridos) {
-  const limite = arredondar(salario * config.percentual);
+function criarResumoPote(config, salario, lancamentosMes, diasNoMes, diasDecorridos, ajuste = 0) {
+  // `ajuste` vem de reequilíbrios: reduz o teto do pote de origem e aumenta o da reserva.
+  const limite = arredondar(salario * config.percentual + ajuste);
   const gastosCategoria = lancamentosMes
     .filter((lancamento) => lancamento.categoria === config.chave)
     .sort((a, b) => a.data.localeCompare(b.data) || b.id - a.id);
@@ -158,6 +176,7 @@ function criarResumoPote(config, salario, lancamentosMes, diasNoMes, diasDecorri
     nome: config.nome,
     percentualOrcamento: config.percentual * 100,
     limite,
+    ajusteReequilibrio: arredondar(ajuste),
     gastoAtual,
     saldo,
     percentualTeto,
@@ -180,8 +199,9 @@ function calcularResumo(mes = obterMesAtual()) {
   const salario = arredondar(UserModel.getProfile().salario);
   const lancamentosMes = filtrarLancamentosDoMes(mes);
 
+  const ajustes = ajustesPorMes[mes] || {};
   const pots = Object.values(CATEGORIAS).map((config) =>
-    criarResumoPote(config, salario, lancamentosMes, diasNoMes, diasDecorridos)
+    criarResumoPote(config, salario, lancamentosMes, diasNoMes, diasDecorridos, ajustes[config.chave] || 0)
   );
 
   const totalGasto = arredondar(
@@ -195,6 +215,7 @@ function calcularResumo(mes = obterMesAtual()) {
     diasNoMes,
     diasDecorridos,
     totalGasto,
+    fechado: Boolean(fechamentos[mes]),
     pots,
     // Mantido para compatibilidade com telas/integrações que esperam os nomes legados.
     limites: Object.fromEntries(pots.map((pote) => [pote.chave, pote.limite])),
@@ -309,9 +330,240 @@ function verificarImpactoCompra({ valor, categoria, mes = obterMesAtual() }) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Fechamento de competência mensal, diagnóstico 50-30-20 e reequilíbrio
+// ---------------------------------------------------------------------------
+
+function copiar(valor) {
+  return JSON.parse(JSON.stringify(valor));
+}
+
+function resolverMesFechamento(mes) {
+  const mesNormalizado = mes ? String(mes).trim() : obterMesAtual();
+  const { mesAtual } = obterInformacoesMes(mesNormalizado);
+
+  if (mesNormalizado > mesAtual) {
+    throw new Error('Não é possível fechar a competência de um mês futuro.');
+  }
+
+  return mesNormalizado;
+}
+
+function medalhaPorConformidade(conformes, totalPotes) {
+  if (conformes === totalPotes) {
+    return {
+      nivel: 'ouro',
+      titulo: 'Orçamento impecável',
+      mensagem: 'Você manteve 50-30-20 perfeitamente este mês!',
+    };
+  }
+  if (conformes === totalPotes - 1) {
+    return {
+      nivel: 'prata',
+      titulo: 'Quase lá',
+      mensagem: `Quase lá! ${conformes} de ${totalPotes} potes ficaram dentro da regra 50-30-20.`,
+    };
+  }
+  if (conformes >= 1) {
+    return {
+      nivel: 'bronze',
+      titulo: 'Em evolução',
+      mensagem: `Apenas ${conformes} de ${totalPotes} potes ficaram dentro da regra 50-30-20. Reequilibrar ajuda a corrigir o rumo.`,
+    };
+  }
+  return {
+    nivel: 'nenhuma',
+    titulo: 'Hora de recomeçar',
+    mensagem: 'Nenhum pote ficou dentro da regra 50-30-20 neste mês. No próximo, comece pelos tetos.',
+  };
+}
+
+/**
+ * Diagnóstico do desvio percentual da regra 50-30-20 para um mês.
+ * - Necessidades e Estilo de Vida são tetos: o desvio só é ruim se o gasto passar da meta.
+ * - Dívidas/Investimentos é piso: o desvio é ruim se o valor destinado ficar abaixo da meta.
+ *   Sobras transferidas por reequilíbrio contam como valor destinado à reserva.
+ * O desvio é medido em pontos percentuais do salário (real% - meta%).
+ */
+function diagnosticarDesvio(mes) {
+  const resumo = calcularResumo(mes);
+  const { salario } = resumo;
+
+  if (!(salario > 0)) {
+    throw new Error('Defina um salário no perfil para diagnosticar a regra 50-30-20.');
+  }
+
+  const potes = resumo.pots.map((pote) => {
+    const config = CATEGORIAS[pote.chave];
+    const metaPercentual = config.percentual * 100;
+    const metaValor = arredondar(salario * config.percentual);
+    const recebido = config.tipoMeta === 'piso' ? Math.max(pote.ajusteReequilibrio, 0) : 0;
+    const alocado = arredondar(pote.gastoAtual + recebido);
+    const realPercentual = arredondar((alocado / salario) * 100);
+    const desvio = arredondar(realPercentual - metaPercentual);
+
+    const conforme = config.tipoMeta === 'teto'
+      ? desvio <= TOLERANCIA_PP
+      : desvio >= -TOLERANCIA_PP;
+
+    let situacao = 'dentro';
+    if (!conforme) situacao = config.tipoMeta === 'teto' ? 'acima' : 'abaixo';
+
+    const desvioAdverso = config.tipoMeta === 'teto' ? Math.max(desvio, 0) : Math.max(-desvio, 0);
+
+    return {
+      chave: pote.chave,
+      nome: pote.nome,
+      tipoMeta: config.tipoMeta,
+      metaPercentual,
+      metaValor,
+      limite: pote.limite,
+      gasto: pote.gastoAtual,
+      alocado,
+      realPercentual,
+      desvioPontosPercentuais: desvio,
+      desvioAdverso: arredondar(desvioAdverso),
+      conforme,
+      situacao,
+      sobra: config.tipoMeta === 'teto' ? arredondar(Math.max(pote.limite - pote.gastoAtual, 0)) : 0,
+    };
+  });
+
+  const conformes = potes.filter((pote) => pote.conforme).length;
+  const desvioTotal = potes.reduce((total, pote) => total + pote.desvioAdverso, 0);
+  const reserva = potes.find((pote) => pote.chave === POTE_RESERVA);
+  const sobras = potes.filter((pote) => pote.sobra > 0).map((pote) => ({
+    chave: pote.chave,
+    nome: pote.nome,
+    valor: pote.sobra,
+  }));
+  const sobraEstiloVida = potes.find((pote) => pote.chave === 'estiloVida').sobra;
+
+  return {
+    mes,
+    salario,
+    totalGasto: resumo.totalGasto,
+    parcial: mes === resumo.mesAtual,
+    potes,
+    conformes,
+    totalPotes: potes.length,
+    conforme: conformes === potes.length,
+    aderencia: arredondar(Math.max(0, 100 - desvioTotal)),
+    medalha: medalhaPorConformidade(conformes, potes.length),
+    sobras,
+    deficitReserva: arredondar(Math.max(reserva.metaValor - reserva.alocado, 0)),
+    sugestaoReequilibrio: sobraEstiloVida > 0
+      ? { origem: 'estiloVida', destino: POTE_RESERVA, valor: sobraEstiloVida }
+      : null,
+  };
+}
+
+function montarFechamento(mes, fechadoEm) {
+  const diagnostico = diagnosticarDesvio(mes);
+  const transferenciasMes = transferencias.filter((item) => item.mes === mes);
+
+  return {
+    ...diagnostico,
+    fechadoEm,
+    atualizadoEm: new Date().toISOString(),
+    transferencias: transferenciasMes.map((item) => ({ ...item })),
+    totalTransferido: arredondar(transferenciasMes.reduce((total, item) => total + item.valor, 0)),
+  };
+}
+
+/**
+ * Fecha a competência de um mês (padrão: mês atual): congela um diagnóstico
+ * 50-30-20 no histórico. Fechar de novo o mesmo mês recalcula o diagnóstico,
+ * preservando as transferências já feitas.
+ */
+function fecharCompetenciaMensal(mes) {
+  const mesFechamento = resolverMesFechamento(mes);
+
+  if (!filtrarLancamentosDoMes(mesFechamento).length) {
+    throw new Error('Não há lançamentos neste mês para fechar a competência.');
+  }
+
+  const fechadoEm = fechamentos[mesFechamento]?.fechadoEm || new Date().toISOString();
+  const fechamento = montarFechamento(mesFechamento, fechadoEm);
+  fechamentos[mesFechamento] = fechamento;
+
+  return copiar(fechamento);
+}
+
+function listarFechamentos() {
+  return Object.values(fechamentos)
+    .sort((a, b) => b.mes.localeCompare(a.mes))
+    .map(copiar);
+}
+
+/**
+ * Transfere sobras de um pote de teto (padrão: Estilo de Vida) para a reserva
+ * de segurança. A transferência ajusta os tetos do mês (origem diminui,
+ * reserva aumenta) e atualiza o fechamento. Sem `valor`, move a sobra inteira.
+ */
+function reequilibrarPotes({ mes, origem = 'estiloVida', destino = POTE_RESERVA, valor } = {}) {
+  const mesFechamento = resolverMesFechamento(mes);
+
+  validarCategoria(origem);
+  validarCategoria(destino);
+
+  if (CATEGORIAS[origem].tipoMeta !== 'teto') {
+    throw new Error('Só é possível transferir sobras de potes com teto (Necessidades ou Estilo de Vida).');
+  }
+  if (destino !== POTE_RESERVA) {
+    throw new Error('As sobras só podem ser transferidas para a reserva (Dívidas / Investimentos).');
+  }
+
+  const fechamentoAtual = fechamentos[mesFechamento];
+  if (!fechamentoAtual) {
+    throw new Error('Feche a competência do mês antes de reequilibrar as sobras.');
+  }
+
+  const poteOrigem = diagnosticarDesvio(mesFechamento).potes.find((pote) => pote.chave === origem);
+  const sobra = poteOrigem.sobra;
+
+  if (sobra <= 0) {
+    throw new Error(`Não há sobras em ${poteOrigem.nome} para transferir.`);
+  }
+
+  const semValor = valor === undefined || valor === null || valor === '';
+  const valorTransferido = semValor ? sobra : validarValor(valor);
+
+  if (valorTransferido > sobra) {
+    throw new Error(`O valor excede a sobra disponível em ${poteOrigem.nome} (${sobra.toFixed(2)}).`);
+  }
+
+  const ajustes = ajustesPorMes[mesFechamento] || (ajustesPorMes[mesFechamento] = {});
+  ajustes[origem] = arredondar((ajustes[origem] || 0) - valorTransferido);
+  ajustes[destino] = arredondar((ajustes[destino] || 0) + valorTransferido);
+
+  const transferencia = {
+    id: proximoIdTransferencia++,
+    mes: mesFechamento,
+    origem,
+    destino,
+    valor: valorTransferido,
+    criadaEm: new Date().toISOString(),
+  };
+  transferencias.push(transferencia);
+
+  const fechamento = montarFechamento(mesFechamento, fechamentoAtual.fechadoEm);
+  fechamentos[mesFechamento] = fechamento;
+
+  return {
+    transferencia: { ...transferencia },
+    fechamento: copiar(fechamento),
+    resumo: calcularResumo(mesFechamento),
+  };
+}
+
 function resetar() {
   lancamentos = [];
   proximoId = 1;
+  fechamentos = {};
+  ajustesPorMes = {};
+  transferencias = [];
+  proximoIdTransferencia = 1;
 }
 
 module.exports = {
@@ -321,5 +573,9 @@ module.exports = {
   listarLancamentos,
   adicionarLancamento,
   removerLancamento,
+  diagnosticarDesvio,
+  fecharCompetenciaMensal,
+  listarFechamentos,
+  reequilibrarPotes,
   resetar,
 };

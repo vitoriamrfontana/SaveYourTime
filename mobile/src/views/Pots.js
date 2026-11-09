@@ -13,6 +13,7 @@ import {
 import { usePotsController } from '../controllers/PotsController';
 import { CORES_STATUS } from '../models/Pots';
 import { checkPurchaseBudgetImpact } from '../services/api';
+import MonthlyCloseCard from '../components/MonthlyCloseCard';
 
 const CATEGORIAS = [
   { chave: 'sobrevivencia', nome: 'Necessidades', percentual: 50 },
@@ -106,6 +107,12 @@ export default function Pots() {
     recarregar,
     adicionarLancamento,
     removerLancamento,
+    historico,
+    fechandoMes,
+    reequilibrando,
+    erroFechamento,
+    fecharMes,
+    reequilibrar,
   } = usePotsController();
 
   const [modalAberto, setModalAberto] = useState(false);
@@ -178,6 +185,27 @@ export default function Pots() {
       setErroCompra(error.message || 'Não foi possível simular esta compra.');
     } finally {
       setVerificandoCompra(false);
+    }
+  };
+
+  const fechamentoAtual = useMemo(
+    () => historico.find((item) => item.mes === dados?.mes) || null,
+    [historico, dados?.mes]
+  );
+
+  const fecharCompetencia = async () => {
+    try {
+      await fecharMes(dados?.mes);
+    } catch (error) {
+      // O erro já aparece no card de fechamento.
+    }
+  };
+
+  const reequilibrarSobras = async () => {
+    try {
+      await reequilibrar({ mes: dados?.mes });
+    } catch (error) {
+      // O erro já aparece no card de fechamento.
     }
   };
 
@@ -354,6 +382,17 @@ export default function Pots() {
           </View>
         ) : null}
       </View>
+
+      <MonthlyCloseCard
+        mes={dados?.mes}
+        fechamento={fechamentoAtual}
+        historico={historico}
+        fechando={fechandoMes}
+        reequilibrando={reequilibrando}
+        erro={erroFechamento}
+        onFechar={fecharCompetencia}
+        onReequilibrar={reequilibrarSobras}
+      />
 
       <View style={styles.extratoCard}>
         <View style={styles.extratoHeader}>

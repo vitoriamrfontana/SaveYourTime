@@ -8,5 +8,8 @@ router.post('/check-purchase', PotsController.verificarImpactoCompra);
 router.get('/lancamentos', PotsController.listarLancamentos);
 router.post('/lancamento', PotsController.criarLancamento);
 router.delete('/lancamento/:id', PotsController.removerLancamento);
+router.get('/month-close', PotsController.listarFechamentos);
+router.post('/month-close', PotsController.fecharCompetenciaMensal);
+router.post('/rebalance', PotsController.reequilibrarPotes);
 
 module.exports = router;

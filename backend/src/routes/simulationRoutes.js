@@ -9,5 +9,9 @@ router.patch('/history/:id/status', SimulationController.atualizarStatus);
 router.get('/health-score', SimulationController.getHealthScore);
 router.get('/analytics/timeline', SimulationController.getEvolucaoHealthScore);
 router.get('/badges', SimulationController.getConquistas);
+router.post('/goals', SimulationController.criarMetaLiberdade);
+router.get('/goals', SimulationController.getMetasProgresso);
+router.post('/goals/:id/deposit', SimulationController.aportarMeta);
+router.post('/goals/impact', SimulationController.simularImpactoMeta);
 
 module.exports = router;

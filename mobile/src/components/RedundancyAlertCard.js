@@ -3,30 +3,17 @@
  *
  * Alerta no topo da tela quando há assinaturas ativas que fazem a mesma
  * coisa (ex.: dois streamings de vídeo). Para cada grupo mostra quanto
- * se gasta junto e sugere pausar uma delas. O botão "Pausar" usa o
- * toggle que já existe, então a assinatura sugerida fica cancelada.
+ * se gasta junto e sugere pausar uma delas.
+ *
+ * Sprint 4: cor de aviso (warning) em vez da de erro, porque é só uma sugestão.
+ * "Pausar" agora pausa de verdade (a tela pergunta por quanto tempo), um teste
+ * grátis sugerido vira "Cancelar teste" e os nomes dos tipos vêm da API.
  */
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
-
-const LABELS_TIPO = {
-  video: 'streaming de vídeo',
-  musica: 'streaming de música',
-  academia: 'academia',
-  plano_saude: 'plano de saúde',
-  conta_bancaria: 'conta bancária',
-  seguro: 'seguro',
-  cartao: 'cartão',
-  nuvem: 'armazenamento em nuvem',
-  produtividade: 'produtividade',
-  jogos: 'jogos',
-};
-
-function formatarMoeda(valor) {
-  return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
+import { formatarMoeda } from '../utils/format';
 
 function listarNomes(assinaturas) {
   const nomes = assinaturas.map((s) => s.nome);
@@ -34,13 +21,16 @@ function listarNomes(assinaturas) {
   return `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`;
 }
 
-function GrupoConcorrente({ grupo, onPausar }) {
+function GrupoConcorrente({ grupo, onPausar, descricaoTipo }) {
   const { tipo, quantidade, gastoMensal, assinaturas, sugestaoPausa } = grupo;
+  // Sprint 4: um teste grátis não se pausa; cancela-se antes da primeira cobrança
+  const ehTeste = sugestaoPausa.status === 'teste';
+  const acao = ehTeste ? 'Cancelar teste' : 'Pausar';
 
   return (
     <View style={styles.grupo}>
       <Text style={styles.grupoTitulo}>
-        {quantidade} serviços de {LABELS_TIPO[tipo] || tipo} ativos
+        {quantidade} serviços de {descricaoTipo(tipo)} ativos
       </Text>
       <Text style={styles.detalhe}>
         {listarNomes(assinaturas)}: {formatarMoeda(gastoMensal)} por mês juntos.
@@ -48,7 +38,9 @@ function GrupoConcorrente({ grupo, onPausar }) {
 
       <View style={styles.sugestao}>
         <View style={styles.sugestaoTexto}>
-          <Text style={styles.sugestaoNome}>Sugestão: pausar {sugestaoPausa.nome}</Text>
+          <Text style={styles.sugestaoNome}>
+            Sugestão: {ehTeste ? 'cancelar o teste de' : 'pausar'} {sugestaoPausa.nome}
+          </Text>
           <Text style={styles.detalhe}>{sugestaoPausa.motivo}</Text>
           <Text style={styles.economia}>
             Economia de {formatarMoeda(sugestaoPausa.economiaMensal)}/mês (
@@ -57,18 +49,18 @@ function GrupoConcorrente({ grupo, onPausar }) {
         </View>
         <TouchableOpacity
           style={styles.botao}
-          onPress={() => onPausar(sugestaoPausa.id)}
+          onPress={() => onPausar(sugestaoPausa)}
           accessibilityRole="button"
-          accessibilityLabel={`Pausar ${sugestaoPausa.nome}`}
+          accessibilityLabel={`${acao}: ${sugestaoPausa.nome}`}
         >
-          <Text style={styles.botaoTexto}>Pausar</Text>
+          <Text style={styles.botaoTexto}>{acao}</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
 
-export default function RedundancyAlertCard({ redundancias, onPausar }) {
+export default function RedundancyAlertCard({ redundancias, onPausar, descricaoTipo }) {
   if (!redundancias || redundancias.totalGrupos === 0) return null;
 
   return (
@@ -80,7 +72,7 @@ export default function RedundancyAlertCard({ redundancias, onPausar }) {
       </Text>
 
       {redundancias.grupos.map((grupo) => (
-        <GrupoConcorrente key={grupo.tipo} grupo={grupo} onPausar={onPausar} />
+        <GrupoConcorrente key={grupo.tipo} grupo={grupo} onPausar={onPausar} descricaoTipo={descricaoTipo} />
       ))}
     </View>
   );
@@ -95,10 +87,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderLeftWidth: 4,
-    borderLeftColor: colors.danger,
+    borderLeftColor: colors.warning,
   },
   titulo: {
-    color: colors.danger,
+    color: colors.warning,
     fontSize: 16,
     fontWeight: 'bold',
   },

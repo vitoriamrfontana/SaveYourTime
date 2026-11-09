@@ -704,36 +704,79 @@ export const ApiService = {
     return getDisciplineStreak();
   },
 
-  toggleSubscription: async (id) => {
-    return request(`/subscriptions/${id}/toggle`, {
-      method: 'PATCH',
-    });
-  },
-
-    createSubscription: async (nome, valorMensal, categoria) => {
+  // Sprint 4 - Detox: aceita um objeto com os campos novos (valorCobrado, ciclo,
+  // data de cobrança, divisão, teste grátis). A forma antiga
+  // (nome, valorMensal, categoria, tipo) continua valendo.
+  createSubscription: async (nomeOuDados, valorMensal, categoria, tipo) => {
+    const dados =
+      typeof nomeOuDados === 'object' && nomeOuDados !== null
+        ? nomeOuDados
+        : { nome: nomeOuDados, valorMensal, categoria, tipo };
     return request('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ nome, valorMensal, categoria }),
+      body: JSON.stringify(dados),
     });
   },
 
-  getSubscriptionInsights: async () => {
-    return request('/subscriptions/insights');
-  },
-
-  getSubscriptionAudit: async () => {
-    return request('/subscriptions/auditoria');
-  },
-  
-  // Sprint 3 - Detox: assinaturas concorrentes e custo por uso
-  getSubscriptionRedundancies: async () => {
-    return request('/subscriptions/redundancies');
-  },
-
-  checkSubscriptionUsage: async (id, frequenciaUso) => {
+  // Sprint 3 - Detox: custo por uso. Sprint 4: aceita também { resposta }, nos
+  // tipos que têm uma pergunta em vez de usos para contar
+  checkSubscriptionUsage: async (id, entrada) => {
+    const corpo = typeof entrada === 'object' && entrada !== null ? entrada : { frequenciaUso: entrada };
     return request(`/subscriptions/${id}/usage-check`, {
       method: 'POST',
-      body: JSON.stringify({ frequenciaUso }),
+      body: JSON.stringify(corpo),
+    });
+  },
+
+  // Sprint 4 - Detox: a tela inteira numa chamada (substitui insights, auditoria e
+  // redundâncias separados) e a taxonomia. Status, edição e exclusão devolvem
+  // { assinatura, resumo }, com o resumo já recalculado.
+  getSubscriptionOverview: async () => {
+    return request('/subscriptions/overview');
+  },
+
+  getSubscriptionMeta: async () => {
+    return request('/subscriptions/meta');
+  },
+
+  changeSubscriptionStatus: async (id, dados) => {
+    return request(`/subscriptions/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  updateSubscription: async (id, dados) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  deleteSubscription: async (id) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Sprint 4 - Detox: catálogo (autocomplete), Detox do mês, guia de cancelamento
+  // e meta de gasto com assinaturas
+  searchSubscriptionCatalog: async (busca) => {
+    return request(`/subscriptions/catalog?q=${encodeURIComponent(busca)}`);
+  },
+
+  getSubscriptionReview: async () => {
+    return request('/subscriptions/review');
+  },
+
+  getSubscriptionCancelGuide: async (id) => {
+    return request(`/subscriptions/${id}/cancel-guide`);
+  },
+
+  updateSubscriptionSettings: async (dados) => {
+    return request('/subscriptions/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
     });
   },
 

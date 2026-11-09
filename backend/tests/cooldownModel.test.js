@@ -389,3 +389,77 @@ describe("cooldownModel.calcularStreakDisciplina", () => {
     expect(streak.mensagem).toContain("1 dia seguido sem");
   });
 });
+
+describe("cooldownModel - Sprint 4 antirrecaída", () => {
+  it("guarda o gatilho do desejo e aceita trocar/limpar pelo questionário", () => {
+    const novo = cooldownModel.addItem({ item: "Jogo", preco: 200, gatilho: "tedio" }, ctx);
+    expect(novo.gatilho).toBe("tedio");
+
+    expect(cooldownModel.responderQuiz(novo.id, { gatilho: "ansiedade" }, ctx).gatilho).toBe("ansiedade");
+    expect(cooldownModel.responderQuiz(novo.id, { usoPrevisto: "raro" }, ctx).gatilho).toBe("ansiedade");
+    expect(cooldownModel.responderQuiz(novo.id, { gatilho: null }, ctx).gatilho).toBeNull();
+  });
+
+  it("aciona o freio: bloqueia compras por 30 min e calcula o impacto do desejo", () => {
+    const resultado = cooldownModel.acionarFreio({ gatilho: "ansiedade", desejoId: 1 }, ctx);
+
+    expect(resultado.item.id).toBe(1);
+    expect(resultado.item.gatilho).toBe("ansiedade");
+    expect(resultado.impacto).toMatchObject({ origem: "desejo", valorReferencia: 3000 });
+    expect(resultado.impacto.percentualRenda).toBeCloseTo(85.71, 1);
+    expect(resultado.respiracao.tecnica).toBe("4-7-8");
+    expect(resultado.mensagens.map((m) => m.tipo)).toEqual(["tempo", "renda", "gatilho", "bloqueio"]);
+    expect(resultado.modoPanico).toMatchObject({ ativo: true, segundosRestantes: 30 * 60, totalAcionamentos: 1 });
+
+    expect(cooldownModel.compraBloqueada(ctx)).toBe(true);
+    const depois = new Date(AGORA.getTime() + 31 * 60 * 1000);
+    expect(cooldownModel.compraBloqueada({ agora: depois })).toBe(false);
+  });
+
+  it("sem desejo nem valor, o impacto soma tudo o que está na trava", () => {
+    const { impacto } = cooldownModel.acionarFreio({}, ctx);
+    expect(impacto).toMatchObject({ origem: "quarentena", valorReferencia: 3340 });
+  });
+
+  it("recusa frear desejo inexistente ou já encerrado", () => {
+    expect(cooldownModel.acionarFreio({ desejoId: 99 }, ctx)).toEqual({ erro: "nao_encontrado" });
+    cooldownModel.registrarDesfecho(2, "desistiu", ctx);
+    expect(cooldownModel.acionarFreio({ desejoId: 2 }, ctx)).toEqual({ erro: "encerrado" });
+  });
+
+  it("relatório de gatilhos: rosca dos superados, conversão e efeito do freio", () => {
+    cooldownModel.responderQuiz(1, { gatilho: "tedio" }, ctx);
+    cooldownModel.responderQuiz(2, { gatilho: "ansiedade" }, ctx);
+    cooldownModel.responderQuiz(3, { gatilho: "necessidade_genuina" }, ctx);
+    cooldownModel.acionarFreio({ desejoId: 1 }, ctx);
+
+    cooldownModel.registrarDesfecho(1, "desistiu", ctx);
+    cooldownModel.registrarDesfecho(2, "comprou", ctx); // antes das 48h: impulso
+    cooldownModel.registrarDesfecho(3, "comprou", ctx); // depois das 48h: consciente
+
+    const analytics = cooldownModel.getAnalyticsGatilhos();
+
+    expect(analytics.superados.total).toBe(1);
+    expect(analytics.superados.valorPoupado).toBe(3000);
+    expect(analytics.superados.fatias.find((f) => f.chave === "tedio")).toMatchObject({
+      quantidade: 1,
+      percentual: 100,
+    });
+    expect(analytics.conversao).toMatchObject({
+      totalDecisoes: 3,
+      desistencias: 1,
+      comprasConscientes: 1,
+      comprasImpulsivas: 1,
+      aposFreio: 1,
+      desistenciasAposFreio: 1,
+    });
+    // desistiu (1) + necessidade genuína pós-quarentena (1) + impulso (0) = 67
+    expect(analytics.maturidade).toMatchObject({ chave: "despertar", pontuacao: 67, decisoesMaduras: 2 });
+    expect(analytics.maturidade.proximoNivel).toMatchObject({ chave: "consciente", faltamPontos: 0, faltamDecisoes: 2 });
+    expect(analytics.insights.length).toBeGreaterThan(0);
+  });
+
+  it("maturidade começa em observação sem decisões", () => {
+    expect(cooldownModel.calcularMaturidade([])).toMatchObject({ chave: "em_observacao", estagio: 1, pontuacao: 0 });
+  });
+});

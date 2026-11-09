@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { criarLancamentoPote, deletarLancamentoPote, getPotes } from '../services/api';
+import {
+  closeMonthlyPots,
+  criarLancamentoPote,
+  deletarLancamentoPote,
+  getMonthlyCloseHistory,
+  getPotes,
+  rebalancePotsBalances,
+} from '../services/api';
 import { montarPots } from '../models/Pots';
 
 export function usePotsController() {
@@ -8,6 +15,10 @@ export function usePotsController() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState(null);
+  const [historico, setHistorico] = useState([]);
+  const [fechandoMes, setFechandoMes] = useState(false);
+  const [reequilibrando, setReequilibrando] = useState(false);
+  const [erroFechamento, setErroFechamento] = useState(null);
 
   const aplicarDados = useCallback((dadosApi) => {
     setDados(dadosApi);
@@ -28,9 +39,53 @@ export function usePotsController() {
     }
   }, [aplicarDados]);
 
+  const carregarHistorico = useCallback(async () => {
+    try {
+      const lista = await getMonthlyCloseHistory();
+      setHistorico(Array.isArray(lista) ? lista : []);
+    } catch (error) {
+      // O histórico é complementar: falha aqui não deve derrubar a tela de potes.
+    }
+  }, []);
+
   useEffect(() => {
     carregar();
+    carregarHistorico();
+  }, [carregar, carregarHistorico]);
+
+  const fecharMes = useCallback(async (mes) => {
+    setFechandoMes(true);
+    setErroFechamento(null);
+
+    try {
+      const resposta = await closeMonthlyPots(mes);
+      if (Array.isArray(resposta?.historico)) setHistorico(resposta.historico);
+      await carregar(mes);
+      return resposta;
+    } catch (error) {
+      setErroFechamento(error.message || 'Não foi possível fechar a competência.');
+      throw error;
+    } finally {
+      setFechandoMes(false);
+    }
   }, [carregar]);
+
+  const reequilibrar = useCallback(async (dadosReequilibrio) => {
+    setReequilibrando(true);
+    setErroFechamento(null);
+
+    try {
+      const resposta = await rebalancePotsBalances(dadosReequilibrio);
+      if (Array.isArray(resposta?.historico)) setHistorico(resposta.historico);
+      if (resposta?.resumo) aplicarDados(resposta.resumo);
+      return resposta;
+    } catch (error) {
+      setErroFechamento(error.message || 'Não foi possível reequilibrar as sobras.');
+      throw error;
+    } finally {
+      setReequilibrando(false);
+    }
+  }, [aplicarDados]);
 
   const adicionarLancamento = useCallback(async (lancamento) => {
     setSalvando(true);
@@ -75,6 +130,12 @@ export function usePotsController() {
     salvando,
     erro,
     recarregar: carregar,
+    historico,
+    fechandoMes,
+    reequilibrando,
+    erroFechamento,
+    fecharMes,
+    reequilibrar,
     adicionarLancamento,
     removerLancamento,
   };

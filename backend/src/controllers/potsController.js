@@ -81,6 +81,40 @@ const PotsController = {
       return enviarErro(res, 400, error.message);
     }
   },
+
+  fecharCompetenciaMensal: (req, res) => {
+    try {
+      const { mes } = req.body || {};
+      const fechamento = PotsModel.fecharCompetenciaMensal(mes);
+      return apiResponse(res, 200, {
+        fechamento,
+        historico: PotsModel.listarFechamentos(),
+      });
+    } catch (error) {
+      return enviarErro(res, 400, error.message);
+    }
+  },
+
+  listarFechamentos: (req, res) => {
+    try {
+      return apiResponse(res, 200, PotsModel.listarFechamentos());
+    } catch (error) {
+      return enviarErro(res, 400, error.message);
+    }
+  },
+
+  reequilibrarPotes: (req, res) => {
+    try {
+      const { mes, origem, destino, valor } = req.body || {};
+      const resultado = PotsModel.reequilibrarPotes({ mes, origem, destino, valor });
+      return apiResponse(res, 200, {
+        ...resultado,
+        historico: PotsModel.listarFechamentos(),
+      });
+    } catch (error) {
+      return enviarErro(res, 400, error.message);
+    }
+  },
 };
 
 module.exports = PotsController;

@@ -468,6 +468,28 @@ export const checkPurchaseBudgetImpact = (valor, categoria) =>
     body: JSON.stringify({ valor: Number(String(valor).replace(',', '.')), categoria }),
   });
 
+// Fechamento mensal 50-30-20: diagnóstico da competência (padrão: mês atual).
+export const closeMonthlyPots = (mes) =>
+  request('/pots/month-close', {
+    method: 'POST',
+    body: JSON.stringify(mes ? { mes } : {}),
+  });
+
+export const getMonthlyCloseHistory = () => request('/pots/month-close');
+
+// Reequilíbrio de sobras. dados: { mes?, origem?, destino?, valor? }
+// Sem valor, transfere a sobra inteira do Estilo de Vida para a reserva.
+export const rebalancePotsBalances = (dados = {}) => {
+  const corpo = { ...dados };
+  if (corpo.valor !== undefined && corpo.valor !== null && corpo.valor !== '') {
+    corpo.valor = Number(String(corpo.valor).replace(',', '.'));
+  }
+  return request('/pots/rebalance', {
+    method: 'POST',
+    body: JSON.stringify(corpo),
+  });
+};
+
 export const getLancamentosPotes = (mes, categoria) => {
   const params = [];
   if (mes) params.push(`mes=${encodeURIComponent(mes)}`);
@@ -843,6 +865,9 @@ export const ApiService = {
   getPotTransactions: async (mes, categoria) => getLancamentosPotes(mes, categoria),
   createPotTransaction: async (lancamento) => criarLancamentoPote(lancamento),
   deletePotTransaction: async (id) => deletarLancamentoPote(id),
+  closeMonthlyPots: async (mes) => closeMonthlyPots(mes),
+  getMonthlyCloseHistory: async () => getMonthlyCloseHistory(),
+  rebalancePotsBalances: async (dados) => rebalancePotsBalances(dados),
   getProductPriceHistory: async (produtoId, periodo, valorHora) => {
     return getProductPriceHistory(produtoId, periodo, valorHora);
   },

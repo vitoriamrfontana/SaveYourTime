@@ -1,53 +1,73 @@
 /**
  * SubscriptionFilters - chips de filtro por categoria e de ordenação
  * por valor. O estado fica no hook useSubscriptions; aqui é só visual.
+ *
+ * Sprint 4: categorias e rótulos vêm da API (/meta) em vez de ficarem
+ * repetidos aqui. Também busca por nome, filtro por status e ordenação por
+ * custo-benefício e por próxima cobrança.
  */
 
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, ScrollView, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
-import { TODAS_CATEGORIAS, ORDENACOES } from '../hooks/useSubscriptions';
-
-const LABELS_CATEGORIA = {
-  streaming: 'Streaming',
-  saude: 'Saúde',
-  financeiro: 'Financeiro',
-  software: 'Software',
-  outros: 'Outros',
-};
-
-export function labelCategoria(categoria) {
-  return LABELS_CATEGORIA[categoria] || 'Outros';
-}
+import { TODAS_CATEGORIAS, TODOS_STATUS, ORDENACOES } from '../hooks/useSubscriptions';
+import Chip from './Chip';
 
 const OPCOES_ORDENACAO = [
   { valor: ORDENACOES.PADRAO, label: 'Ordem de cadastro' },
   { valor: ORDENACOES.MAIOR_VALOR, label: 'Maior valor' },
   { valor: ORDENACOES.MENOR_VALOR, label: 'Menor valor' },
+  // Sprint 4
+  { valor: ORDENACOES.CUSTO_BENEFICIO, label: 'Pior custo-benefício' },
+  { valor: ORDENACOES.PROXIMA_COBRANCA, label: 'Próxima cobrança' },
 ];
-
-function Chip({ label, ativo, onPress }) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.chip, ativo && styles.chipAtivo]}
-      accessibilityRole="button"
-      accessibilityState={{ selected: ativo }}
-    >
-      <Text style={[styles.chipTexto, ativo && styles.chipTextoAtivo]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
 
 export default function SubscriptionFilters({
   categorias,
   categoriaFiltro,
   onChangeCategoria,
+  status,
+  statusFiltro,
+  onChangeStatus,
+  busca,
+  onChangeBusca,
   ordenacao,
   onChangeOrdenacao,
 }) {
   return (
     <View style={styles.container}>
+      {/* Sprint 4 */}
+      <TextInput
+        style={styles.busca}
+        value={busca}
+        onChangeText={onChangeBusca}
+        placeholder="Buscar por nome"
+        placeholderTextColor={colors.textMuted}
+        accessibilityLabel="Buscar assinatura por nome"
+        returnKeyType="search"
+      />
+
+      <Text style={styles.rotulo}>Situação</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.linha}
+      >
+        <Chip
+          label="Todas"
+          ativo={statusFiltro === TODOS_STATUS}
+          onPress={() => onChangeStatus(TODOS_STATUS)}
+        />
+        {status.map((opcao) => (
+          <Chip
+            key={opcao.valor}
+            label={opcao.rotulo}
+            ativo={statusFiltro === opcao.valor}
+            onPress={() => onChangeStatus(opcao.valor)}
+          />
+        ))}
+      </ScrollView>
+
       <Text style={styles.rotulo}>Categoria</Text>
       <ScrollView
         horizontal
@@ -61,10 +81,10 @@ export default function SubscriptionFilters({
         />
         {categorias.map((categoria) => (
           <Chip
-            key={categoria}
-            label={labelCategoria(categoria)}
-            ativo={categoriaFiltro === categoria}
-            onPress={() => onChangeCategoria(categoria)}
+            key={categoria.valor}
+            label={categoria.rotulo}
+            ativo={categoriaFiltro === categoria.valor}
+            onPress={() => onChangeCategoria(categoria.valor)}
           />
         ))}
       </ScrollView>
@@ -102,24 +122,16 @@ const styles = StyleSheet.create({
   linhaQuebra: {
     flexWrap: 'wrap',
   },
-  chip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
+  // Sprint 4
+  busca: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  chipAtivo: {
-    backgroundColor: colors.accentStrong,
-    borderColor: colors.accent,
-  },
-  chipTexto: {
-    color: colors.textSecondary,
-    fontSize: 13,
-  },
-  chipTextoAtivo: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     color: colors.textPrimary,
-    fontWeight: '600',
+    fontSize: 14,
+    marginBottom: 8,
   },
 });

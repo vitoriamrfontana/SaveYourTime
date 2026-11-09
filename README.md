@@ -125,9 +125,48 @@ Cada integrante é responsável pelo desenvolvimento da sua respectiva funcional
 - **`GET /api/simulate`**: Retorna o histórico de simulações realizadas.
 
 ### 5.3. Módulo Detox de Assinaturas
-- **`GET /api/subscriptions`**: Retorna a lista de assinaturas e o cálculo da economia total.
-- **`POST /api/subscriptions`**: Cadastra nova assinatura recorrente.
-- **`PATCH /api/subscriptions/:id/toggle`**: Alterna o status de cancelado/ativo de uma assinatura.
+- **`GET /api/subscriptions`**: Retorna a lista de assinaturas e a economia (formato da Sprint 1, mantido).
+  - *Resposta:* `{ "subscriptions": [...], "economia": { "economiaMensal": 59.80, "economiaAnual": 717.60, "economiaAcumulada": 139.40 } }`
+- **`GET /api/subscriptions/overview`**: Tudo o que a tela do Detox usa, numa chamada só.
+  - *Resposta:* `{ "subscriptions", "economia", "insights", "auditoria", "redundancias", "proximasCobrancas", "limite", "taxas" }`
+- **`GET /api/subscriptions/meta`**: Categorias, tipos (com a forma de verificar o uso de cada um), ciclos, status, limites dos campos e o checklist de cobranças esquecidas.
+- **`GET /api/subscriptions/catalog?q=net`**: Autocomplete de serviços conhecidos, com planos, preço de referência datado e link oficial de cancelamento. Com menos de 2 letras devolve `[]`; `q` tem até 60 caracteres.
+  - *Resposta:* `[{ "id": "netflix", "nome": "Netflix", "categoria": "streaming", "tipo": "video", "precos": { "conferidosEm": "2026-11", "fonte": "site oficial" }, "planos": [...], "planoSugerido": { "nome": "Padrão", "valor": 51.90, "ciclo": "mensal" }, "linkCancelamento": "https://..." }]`
+- **`GET /api/subscriptions/upcoming?dias=7`**: Cobranças, fins de teste grátis e fins de pausa dos próximos dias (1 a 90; padrão 7).
+- **`GET /api/subscriptions/review`**: Detox do mês: um cartão por assinatura ativa ou em teste, com sugestão (`manter`, `verificar`, `pausar`, `cancelar` ou `decidir`) e o motivo.
+- **`GET /api/subscriptions/settings`** e **`PATCH /api/subscriptions/settings`**: Meta de gasto com assinaturas, em % da renda do Perfil.
+  - *Payload:* `{ "limitePercentualRenda": 8 }` (de 1 a 50, até 1 casa decimal)
+  - *Resposta do PATCH:* `{ "configuracoes": { "limitePercentualRenda": 8 }, "resumo": { ... } }`
+- **`POST /api/subscriptions`**: Cadastra uma assinatura. O formato antigo (`{ "nome", "valorMensal", "categoria" }`) continua aceito.
+  - *Payload:* `{ "nome": "Netflix", "valorCobrado": 51.90, "ciclo": "mensal", "diaCobranca": 10, "categoria": "streaming", "tipo": "video", "compartilhadaCom": 1, "catalogoId": "netflix" }`
+  - Ciclos: `semanal`, `mensal`, `trimestral`, `semestral` e `anual`; fora do mensal, envie `proximaCobranca` (`AAAA-MM-DD`) em vez de `diaCobranca`. Para teste grátis: `"status": "teste", "fimTeste": "2026-11-15"`.
+- **`PATCH /api/subscriptions/:id`**: Edita nome, valor, ciclo, data de cobrança, divisão, categoria e tipo. Mudança de valor entra no histórico de preços.
+- **`PATCH /api/subscriptions/:id/status`**: Muda o status.
+  - *Payload:* `{ "status": "pausada", "pausadaAte": "2026-12-01" }` (também `"ativa"`, `"cancelada"` e `"teste"` com `fimTeste`)
+- **`PATCH /api/subscriptions/:id/toggle`**: Cancela (ativa ou em teste) ou reativa (pausada ou cancelada). Mantido para compatibilidade.
+- **`DELETE /api/subscriptions/:id`**: Exclui um cadastro feito por engano. É diferente de cancelar: a assinatura some da lista e da economia.
+- **`POST /api/subscriptions/:id/usage-check`**: Verificação de uso do mês.
+  - *Payload:* `{ "frequenciaUso": 12 }`, ou `{ "resposta": true }` nos tipos que se verificam com uma pergunta (seguro, conta bancária, cartão e nuvem)
+  - *Resposta:* `{ "forma": "uso", "custoPorUso": 3.33, "referencia": 15, "classificacao": "excelente", "validaAte": "2026-12-01", ... }`
+- **`GET /api/subscriptions/:id/cancel-guide`**: Como cancelar: link oficial (quando o serviço está no catálogo), passo a passo, lojas de aplicativo e direitos do consumidor que valem para o caso.
+- **`GET /api/subscriptions/insights`**, **`/auditoria`** e **`/redundancies`**: Partes do `/overview` em separado (Sprints 2 e 3).
+
+`PATCH /:id`, `PATCH /:id/status` e `DELETE /:id` devolvem `{ "assinatura", "resumo" }`, com o resumo já recalculado.
+
+> **Regras de cálculo (`subscriptionsModel.js`):**
+> - **Datas e dinheiro:** datas `AAAA-MM-DD` no fuso de São Paulo; somas e arredondamentos em centavos inteiros.
+> - **Status:** `ativa`, `teste` (vira ativa quando o teste acaba), `pausada` (volta sozinha no `pausadaAte`) e `cancelada`.
+> - **Valor mensal:** o valor de cada cobrança convertido para o mês pelo ciclo e dividido entre quem divide o plano (`compartilhadaCom + 1`).
+> - **Economia acumulada:** soma as cobranças que deixaram de acontecer enquanto a assinatura esteve pausada ou cancelada, sem contar a mesma cobrança duas vezes.
+> - **Custo invisível:** gasto em 12, 36 e 60 meses, também com reajuste anual pelo IPCA de 12 meses, e quanto o mesmo dinheiro viraria aplicado a 100% do CDI, já sem o IR (tabela regressiva da Lei 11.033/2004: 22,5% até 180 dias, 20% até 360, 17,5% até 720 e 15% acima disso).
+> - **Juros compostos:** a economia mensal das canceladas aplicada todo mês a 100% do CDI, com o IR regressivo de cada aporte (`montanteLiquido`).
+> - **Taxas:** CDI (série SGS 4389) e IPCA de 12 meses (série SGS 13522) do Banco Central, com limite de 3 s por consulta, cache de 24 h e valores de referência quando o BCB não responde (`taxas.fonte` é `"bcb"` ou `"fallback"`).
+> - **Custo por uso:** valor mensal ÷ usos no mês, comparado com a referência do tipo (ex.: vídeo R$ 15, música R$ 5, academia R$ 30). Até metade da referência é `excelente`, até a referência é `neutro`; acima disso, ou sem nenhum uso, é `prejuizo`. A verificação vale 30 dias.
+> - **Score de eficiência (0 a 100):** começa em 100 e perde pontos por custo-benefício (neutro −15, prejuízo −40), por falta de verificação válida (−10), por concorrente ativo do mesmo tipo (−20) e pelo peso na renda (−8 por ponto percentual, até −20). É `bom` a partir de 70, `atencao` de 40 a 69 e `ruim` abaixo de 40.
+> - **Concorrentes:** assinaturas ativas do mesmo tipo (ex.: dois streamings de vídeo); a sugestão de pausa vai para a que menos vale a pena manter.
+> - **Meta de gasto:** 5% da renda do Perfil por padrão (de 1% a 50%); `limite.acimaDoLimite` avisa quando o gasto passa da meta.
+>
+> Os preços do catálogo são **referência datada** (`precos.conferidosEm`) e editável, não o preço atual. O guia de cancelamento cita o CDC art. 49 (arrependimento em 7 dias, para contratação fora do estabelecimento) e, só nos serviços regulados (no app, financeiros e plano de saúde), o Decreto 11.034/2022 art. 14 (cancelamento pelo SAC). As projeções são estimativas educativas, não recomendação de investimento. Como no resto do MVP, os dados ficam em memória.
 
 ### 5.4. Módulo Trava Cooldown 48h
 - **`GET /api/cooldown`**: Retorna os desejos em quarentena (cada um já com Score de Impulso, fase temporal e marcos) mais o resumo da trava.

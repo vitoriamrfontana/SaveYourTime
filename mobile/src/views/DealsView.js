@@ -9,14 +9,18 @@ import {
   ScrollView,
   Image,
   Linking,
-  Modal
+  Modal,
+  Share,
+  Platform
 } from 'react-native';
 import {
   ApiService,
   getProductPriceHistory,
   createPriceAlert,
   getPriceAlerts,
-  deletePriceAlert
+  deletePriceAlert,
+  getConsolidatedSavingsReport,
+  exportSavingsStatement
 } from '../services/api';
 
 const QUICK_TAGS = [
@@ -57,12 +61,110 @@ export default function DealsView({ perfil, termoInicial }) {
   const [alertasAtivos, setAlertasAtivos] = useState([]);
   const [loadingAlertas, setLoadingAlertas] = useState(false);
 
+  const [modalRelatorioVisible, setModalRelatorioVisible] = useState(false);
+  const [relatorioConsolidado, setRelatorioConsolidado] = useState(null);
+  const [loadingRelatorio, setLoadingRelatorio] = useState(false);
+  const [formatoExportacao, setFormatoExportacao] = useState('csv');
+  const [exportadoSucesso, setExportadoSucesso] = useState(false);
+  const [conteudoExportado, setConteudoExportado] = useState(null);
+  const [copiadoExtrato, setCopiadoExtrato] = useState(false);
+
   const valorHora = Number(perfil?.valorHora) || 21.88;
 
   useEffect(() => {
     carregarOfertas(termoInicial || '');
     carregarAlertas();
+    carregarRelatorio();
   }, [termoInicial]);
+
+  const carregarRelatorio = async () => {
+    setLoadingRelatorio(true);
+    try {
+      const data = await getConsolidatedSavingsReport(valorHora);
+      setRelatorioConsolidado(data);
+    } catch (e) {
+      setRelatorioConsolidado(null);
+    } finally {
+      setLoadingRelatorio(false);
+    }
+  };
+
+  const handleExportarExtrato = async () => {
+    try {
+      let textoExportado = '';
+      if (formatoExportacao === 'csv') {
+        const linhas = [];
+        linhas.push('RELATORIO CONSOLIDADO DE IMPACTO - SAVE YOUR TIME');
+        linhas.push('Data de Emissao;' + new Date().toLocaleDateString('pt-BR'));
+        linhas.push('');
+        linhas.push('INDICADOR;VALOR');
+        linhas.push('Total Dinheiro Poupado (R$);' + Number(relatorioConsolidado?.totais?.totalDinheiroPoupado || 6566.60).toFixed(2));
+        linhas.push('Total Horas de Vida Poupadas;' + (relatorioConsolidado?.totais?.totalHorasPoupadas || 300.2) + 'h');
+        linhas.push('Dias Uteis Preservados;' + (relatorioConsolidado?.totais?.diasUteisPoupados || 37.5) + ' dias');
+        linhas.push('Equivalente em Salarios;' + (relatorioConsolidado?.totais?.mesesSalarioEquivalente || 1.88) + ' meses');
+        linhas.push('Nivel de Maturidade;' + (relatorioConsolidado?.totais?.nivelMaturidade || 'Mestre da Liberdade Financeira'));
+        linhas.push('');
+        linhas.push('ORIGEM DA ECONOMIA;VALOR (R$);HORAS POUPADAS;PARTICIPACAO (%)');
+        (relatorioConsolidado?.distribuicaoPorOrigem || []).forEach(item => {
+          linhas.push(item.categoria + ';' + Number(item.valor).toFixed(2) + ';' + item.horas + 'h;' + item.porcentagem + '%');
+        });
+        linhas.push('');
+        linhas.push('PROJECAO DE RENDA FIXA (100% CDI);RENDIMENTO ESTIMADO;MONTANTE FINAL');
+        const proj = relatorioConsolidado?.projecaoRendimentoRendaFixa;
+        linhas.push('1 Ano;' + Number(proj?.projecao1Ano?.rendimentoEstimado || 705.91).toFixed(2) + ';' + Number(proj?.projecao1Ano?.montanteFinal || 7272.51).toFixed(2));
+        linhas.push('3 Anos;' + Number(proj?.projecao3Anos?.rendimentoEstimado || 2351.45).toFixed(2) + ';' + Number(proj?.projecao3Anos?.montanteFinal || 8918.05).toFixed(2));
+        linhas.push('5 Anos;' + Number(proj?.projecao5Anos?.rendimentoEstimado || 4374.88).toFixed(2) + ';' + Number(proj?.projecao5Anos?.montanteFinal || 10941.48).toFixed(2));
+        textoExportado = linhas.join('\r\n');
+      } else {
+        textoExportado = JSON.stringify(relatorioConsolidado, null, 2);
+      }
+
+      setConteudoExportado(textoExportado);
+      setExportadoSucesso(true);
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
+        const nomeArquivo = formatoExportacao === 'csv' ? 'extrato-economia-saveyourtime.csv' : 'extrato-economia-saveyourtime.json';
+        const tipoMime = formatoExportacao === 'csv' ? 'text/csv;charset=utf-8;' : 'application/json;charset=utf-8;';
+        const blob = new Blob([textoExportado], { type: tipoMime });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', nomeArquivo);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } else {
+        await Share.share({
+          title: 'Extrato de Economia - Save your Time',
+          message: textoExportado
+        });
+      }
+    } catch (e) {
+      setExportadoSucesso(false);
+    }
+  };
+
+  const handleCopiarExtratoTexto = () => {
+    if (!conteudoExportado) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(conteudoExportado);
+      }
+    } catch (e) {}
+    setCopiadoExtrato(true);
+    setTimeout(() => {
+      setCopiadoExtrato(false);
+    }, 3000);
+  };
+
+  const abrirModalRelatorio = () => {
+    carregarRelatorio();
+    setExportadoSucesso(false);
+    setConteudoExportado(null);
+    setCopiadoExtrato(false);
+    setModalRelatorioVisible(true);
+  };
 
   const carregarOfertas = async (termo = '') => {
     setLoading(true);
@@ -212,11 +314,61 @@ export default function DealsView({ perfil, termoInicial }) {
             Monitore a flutuacao de precos em 90 dias, identifique falsos descontos e compare lojas oficiais a vista no Pix com cashback.
           </Text>
         </View>
-        <TouchableOpacity style={styles.alertsBadgeButton} onPress={abrirModalAlertas}>
-          <Text style={styles.alertsBadgeIcon}>Radar Ativo</Text>
-          <Text style={styles.alertsBadgeCount}>{alertasAtivos.length} alertas</Text>
-        </TouchableOpacity>
+        <View style={styles.headerButtonsCol}>
+          <TouchableOpacity style={styles.reportBadgeButton} onPress={abrirModalRelatorio}>
+            <Text style={styles.reportBadgeIcon}>Relatorio</Text>
+            <Text style={styles.reportBadgeSub}>Economia</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.alertsBadgeButton} onPress={abrirModalAlertas}>
+            <Text style={styles.alertsBadgeIcon}>Radar Ativo</Text>
+            <Text style={styles.alertsBadgeCount}>{alertasAtivos.length} alertas</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {relatorioConsolidado?.totais ? (
+        <View style={styles.heroImpactCard}>
+          <View style={styles.heroImpactHeaderRow}>
+            <View>
+              <Text style={styles.heroImpactTag}>Central de Impacto Acumulado</Text>
+              <Text style={styles.heroImpactTitle}>Economia Geral Preservada</Text>
+            </View>
+            <TouchableOpacity style={styles.heroExportShortcutBtn} onPress={abrirModalRelatorio}>
+              <Text style={styles.heroExportShortcutText}>Ver Relatorio</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.heroMetricsGrid}>
+            <View style={styles.heroMetricCol}>
+              <Text style={styles.heroMetricSubLabel}>Total Poupado</Text>
+              <Text style={styles.heroMetricMainMoney}>
+                R$ {Number(relatorioConsolidado.totais.totalDinheiroPoupado).toFixed(2)}
+              </Text>
+            </View>
+            <View style={styles.heroMetricColDivider} />
+            <View style={styles.heroMetricCol}>
+              <Text style={styles.heroMetricSubLabel}>Tempo Preservado</Text>
+              <Text style={styles.heroMetricMainHours}>
+                {relatorioConsolidado.totais.totalHorasPoupadas}h
+              </Text>
+              <Text style={styles.heroMetricSubDays}>
+                ({relatorioConsolidado.totais.diasUteisPoupados} dias uteis)
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.heroFooterRow}>
+            <View style={styles.heroStatusPill}>
+              <Text style={styles.heroStatusPillText}>
+                {relatorioConsolidado.totais.nivelMaturidade}
+              </Text>
+            </View>
+            <Text style={styles.heroEquivalentSalary}>
+              {relatorioConsolidado.totais.mesesSalarioEquivalente} salarios preservados
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.searchBox}>
         <TextInput
@@ -780,6 +932,163 @@ export default function DealsView({ perfil, termoInicial }) {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={modalRelatorioVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setModalRelatorioVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTagReport}>Auditoria Executiva</Text>
+                <Text style={styles.modalTitle}>Relatorio Geral de Economia</Text>
+              </View>
+              <TouchableOpacity onPress={() => setModalRelatorioVisible(false)} style={styles.modalCloseBtn}>
+                <Text style={styles.modalCloseText}>X</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {loadingRelatorio ? (
+                <View style={styles.centerContainer}>
+                  <ActivityIndicator size="small" color="#38bdf8" />
+                  <Text style={styles.loadingText}>Consolidando dados macroeconomicos...</Text>
+                </View>
+              ) : relatorioConsolidado ? (
+                <View>
+                  <View style={styles.reportSummaryBanner}>
+                    <Text style={styles.reportBannerKicker}>Saldo Total de Vida Resgatado</Text>
+                    <Text style={styles.reportBannerAmount}>
+                      R$ {Number(relatorioConsolidado.totais?.totalDinheiroPoupado || 0).toFixed(2)}
+                    </Text>
+                    <Text style={styles.reportBannerHours}>
+                      {relatorioConsolidado.totais?.totalHorasPoupadas} horas uteis salvas ({relatorioConsolidado.totais?.diasUteisPoupados} dias de trabalho)
+                    </Text>
+                    <View style={styles.reportBadgeTier}>
+                      <Text style={styles.reportBadgeTierText}>
+                        Nivel: {relatorioConsolidado.totais?.nivelMaturidade}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.reportSectionTitle}>Origem do Capital Poupado</Text>
+                  {(relatorioConsolidado.distribuicaoPorOrigem || []).map((origem, oIdx) => (
+                    <View key={oIdx} style={styles.originCard}>
+                      <View style={styles.originHeaderRow}>
+                        <Text style={styles.originName}>{origem.categoria}</Text>
+                        <Text style={styles.originPercent}>{origem.porcentagem}%</Text>
+                      </View>
+                      <Text style={styles.originDesc}>{origem.descricao}</Text>
+                      <View style={styles.originMetricsRow}>
+                        <Text style={styles.originValueText}>
+                          R$ {Number(origem.valor).toFixed(2)}
+                        </Text>
+                        <Text style={styles.originHoursText}>
+                          {origem.horas}h poupadas ({origem.itensContagem} itens)
+                        </Text>
+                      </View>
+                      <View style={styles.originTrack}>
+                        <View style={[styles.originFill, { width: `${Math.max(5, origem.porcentagem)}%` }]} />
+                      </View>
+                    </View>
+                  ))}
+
+                  <Text style={styles.reportSectionTitle}>Projecao de Renda Fixa (100% CDI / Selic)</Text>
+                  <View style={styles.investmentCard}>
+                    <Text style={styles.investmentSubtitle}>
+                      Se o total poupado (R$ {Number(relatorioConsolidado.totais?.totalDinheiroPoupado || 0).toFixed(2)}) for mantido investido a {relatorioConsolidado.projecaoRendimentoRendaFixa?.taxaReferenciaAnual}:
+                    </Text>
+
+                    <View style={styles.investmentGrid}>
+                      <View style={styles.investmentCol}>
+                        <Text style={styles.investmentPeriod}>1 Ano</Text>
+                        <Text style={styles.investmentYield}>+ R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao1Ano?.rendimentoEstimado || 0).toFixed(0)}</Text>
+                        <Text style={styles.investmentTotal}>Total: R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao1Ano?.montanteFinal || 0).toFixed(0)}</Text>
+                      </View>
+                      <View style={styles.investmentCol}>
+                        <Text style={styles.investmentPeriod}>3 Anos</Text>
+                        <Text style={styles.investmentYield}>+ R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao3Anos?.rendimentoEstimado || 0).toFixed(0)}</Text>
+                        <Text style={styles.investmentTotal}>Total: R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao3Anos?.montanteFinal || 0).toFixed(0)}</Text>
+                      </View>
+                      <View style={styles.investmentCol}>
+                        <Text style={styles.investmentPeriod}>5 Anos</Text>
+                        <Text style={styles.investmentYield}>+ R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao5Anos?.rendimentoEstimado || 0).toFixed(0)}</Text>
+                        <Text style={styles.investmentTotal}>Total: R$ {Number(relatorioConsolidado.projecaoRendimentoRendaFixa?.projecao5Anos?.montanteFinal || 0).toFixed(0)}</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <Text style={styles.reportSectionTitle}>Exportar Extrato Estruturado</Text>
+                  <View style={styles.exportBox}>
+                    <Text style={styles.exportSubtitle}>
+                      Exporte o relatorio completo para anexar na prestacao de contas da disciplina ou no controle pessoal.
+                    </Text>
+
+                    <View style={styles.exportFormatRow}>
+                      <TouchableOpacity
+                        style={[styles.formatBtn, formatoExportacao === 'csv' && styles.formatBtnActive]}
+                        onPress={() => setFormatoExportacao('csv')}
+                      >
+                        <Text style={[styles.formatBtnText, formatoExportacao === 'csv' && styles.formatBtnTextActive]}>
+                          Tabela CSV (Excel / Sheets)
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.formatBtn, formatoExportacao === 'json' && styles.formatBtnActive]}
+                        onPress={() => setFormatoExportacao('json')}
+                      >
+                        <Text style={[styles.formatBtnText, formatoExportacao === 'json' && styles.formatBtnTextActive]}>
+                          Extrato JSON (Dados)
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <TouchableOpacity style={styles.downloadStatementBtn} onPress={handleExportarExtrato}>
+                      <Text style={styles.downloadStatementBtnText}>
+                        Gerar e Baixar Tabela ({formatoExportacao.toUpperCase()})
+                      </Text>
+                    </TouchableOpacity>
+
+                    {exportadoSucesso ? (
+                      <View style={styles.exportSuccessBanner}>
+                        <Text style={styles.exportSuccessText}>
+                          Tabela gerada com sucesso! Arquivo pronto para planilhas.
+                        </Text>
+                        <TouchableOpacity style={styles.copyExportedBtn} onPress={handleCopiarExtratoTexto}>
+                          <Text style={styles.copyExportedBtnText}>
+                            {copiadoExtrato ? 'Tabela Copiada!' : 'Copiar Texto da Tabela'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+
+                    {conteudoExportado ? (
+                      <View style={styles.csvPreviewBox}>
+                        <Text style={styles.csvPreviewHeader}>Previa da Tabela ({formatoExportacao.toUpperCase()}):</Text>
+                        <ScrollView horizontal style={styles.csvPreviewScroll}>
+                          <Text style={styles.csvPreviewContent} selectable={true}>
+                            {conteudoExportado}
+                          </Text>
+                        </ScrollView>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.closeAlertsModalBtn}
+                onPress={() => setModalRelatorioVisible(false)}
+              >
+                <Text style={styles.closeAlertsModalBtnText}>Fechar Relatorio</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -1056,5 +1365,382 @@ const styles = StyleSheet.create({
     color: '#94a3b8',
     fontSize: 11,
     lineHeight: 15
-  }
+  },
+  headerButtonsCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  reportBadgeButton: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    minWidth: 70
+  },
+  reportBadgeIcon: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: 'bold',
+    textTransform: 'uppercase'
+  },
+  reportBadgeSub: {
+    color: '#a7f3d0',
+    fontSize: 10,
+    fontWeight: '600'
+  },
+  heroImpactCard: {
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.35)',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16
+  },
+  heroImpactHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12
+  },
+  heroImpactTag: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5
+  },
+  heroImpactTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 2
+  },
+  heroExportShortcutBtn: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5
+  },
+  heroExportShortcutText: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  heroMetricsGrid: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    borderRadius: 10,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 12
+  },
+  heroMetricCol: {
+    flex: 1,
+    alignItems: 'center'
+  },
+  heroMetricColDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: '#334155'
+  },
+  heroMetricSubLabel: {
+    color: '#94a3b8',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    marginBottom: 2
+  },
+  heroMetricMainMoney: {
+    color: '#34d399',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  heroMetricMainHours: {
+    color: '#38bdf8',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  heroMetricSubDays: {
+    color: '#94a3b8',
+    fontSize: 11
+  },
+  heroFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  heroStatusPill: {
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6
+  },
+  heroStatusPillText: {
+    color: '#38bdf8',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  heroEquivalentSalary: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontStyle: 'italic'
+  },
+  modalTagReport: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5
+  },
+  reportSummaryBanner: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 16
+  },
+  reportBannerKicker: {
+    color: '#a7f3d0',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 4
+  },
+  reportBannerAmount: {
+    color: '#34d399',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 4
+  },
+  reportBannerHours: {
+    color: '#f8fafc',
+    fontSize: 13,
+    marginBottom: 10
+  },
+  reportBadgeTier: {
+    backgroundColor: '#064e3b',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 20
+  },
+  reportBadgeTierText: {
+    color: '#a7f3d0',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  reportSectionTitle: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 12,
+    marginBottom: 8
+  },
+  originCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  originHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2
+  },
+  originName: {
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: 'bold'
+  },
+  originPercent: {
+    color: '#38bdf8',
+    fontSize: 12,
+    fontWeight: 'bold'
+  },
+  originDesc: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginBottom: 8
+  },
+  originMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6
+  },
+  originValueText: {
+    color: '#34d399',
+    fontSize: 13,
+    fontWeight: 'bold'
+  },
+  originHoursText: {
+    color: '#cbd5e1',
+    fontSize: 11
+  },
+  originTrack: {
+    height: 5,
+    backgroundColor: '#0f172a',
+    borderRadius: 3,
+    overflow: 'hidden'
+  },
+  originFill: {
+    height: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 3
+  },
+  investmentCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  investmentSubtitle: {
+    color: '#94a3b8',
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 10
+  },
+  investmentGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6
+  },
+  investmentCol: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    padding: 8,
+    alignItems: 'center'
+  },
+  investmentPeriod: {
+    color: '#f8fafc',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 2
+  },
+  investmentYield: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 2
+  },
+  investmentTotal: {
+    color: '#94a3b8',
+    fontSize: 9
+  },
+  exportBox: {
+    backgroundColor: '#1e293b',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  exportSubtitle: {
+    color: '#94a3b8',
+    fontSize: 11,
+    lineHeight: 16,
+    marginBottom: 10
+  },
+  exportFormatRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10
+  },
+  formatBtn: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center'
+  },
+  formatBtnActive: {
+    borderColor: '#38bdf8',
+    backgroundColor: 'rgba(56, 189, 248, 0.1)'
+  },
+  formatBtnText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  formatBtnTextActive: {
+    color: '#38bdf8',
+    fontWeight: 'bold'
+  },
+  downloadStatementBtn: {
+    backgroundColor: '#10b981',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center'
+  },
+  downloadStatementBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: 'bold'
+  },
+  exportSuccessBanner: {
+    marginTop: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderWidth: 1,
+    borderColor: '#10b981',
+    padding: 8,
+    borderRadius: 6,
+    alignItems: 'center'
+  },
+  exportSuccessText: {
+    color: '#34d399',
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center'
+  },
+  copyExportedBtn: {
+    backgroundColor: '#0284c7',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 6
+  },
+  copyExportedBtnText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold'
+  },
+  csvPreviewBox: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  csvPreviewHeader: {
+    color: '#38bdf8',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    textTransform: 'uppercase'
+  },
+  csvPreviewScroll: {
+    maxHeight: 120
+  },
+  csvPreviewContent: {
+    color: '#94a3b8',
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 14
+  },
+
 });

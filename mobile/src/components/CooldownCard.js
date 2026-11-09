@@ -9,6 +9,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors } from '../theme/colors';
+import { rotuloDoGatilho } from '../utils/antirrecaida';
 
 const NIVEL_CORES = {
   Baixo: colors.success,
@@ -61,7 +62,10 @@ export default function CooldownCard({ item, onEncerrar, onResponderQuiz }) {
       </View>
 
       {item.periodo && (
-        <Text style={styles.periodo}>Quarentena de {item.periodo.rotulo}</Text>
+        <Text style={styles.periodo}>
+          Quarentena de {item.periodo.rotulo}
+          {item.gatilho ? ` · gatilho: ${rotuloDoGatilho(item.gatilho)?.toLowerCase()}` : ''}
+        </Text>
       )}
 
       <Text style={styles.preco}>{formatarMoeda(preco)}</Text>

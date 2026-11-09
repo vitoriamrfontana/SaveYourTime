@@ -1,9 +1,11 @@
 const subscriptionsModel = require("../src/models/subscriptionsModel");
 
+// Sprint 4: as inativas têm canceladaEm (foram canceladas pelo usuário);
+// sem a data, elas não contariam mais como economia
 const SEED = [
   { id: 1, nome: "Streaming de Filmes", valorMensal: 39.9, ativo: true },
-  { id: 2, nome: "Academia Online", valorMensal: 49.9, ativo: false },
-  { id: 3, nome: "Seguro Celular", valorMensal: 24.9, ativo: false },
+  { id: 2, nome: "Academia Online", valorMensal: 49.9, ativo: false, canceladaEm: "2026-08-10T15:00:00.000Z" },
+  { id: 3, nome: "Seguro Celular", valorMensal: 24.9, ativo: false, canceladaEm: "2026-09-05T15:00:00.000Z" },
 ];
 
 beforeEach(() => {
@@ -28,7 +30,7 @@ describe("subscriptionsModel.getSubscriptions", () => {
 });
 
 describe("subscriptionsModel.getEconomiaTotal", () => {
-  it("soma apenas as assinaturas canceladas (ativo: false)", () => {
+  it("soma apenas as assinaturas canceladas pelo usuário", () => {
     const economia = subscriptionsModel.getEconomiaTotal();
     expect(economia.economiaMensal).toBeCloseTo(74.8);
     expect(economia.economiaAnual).toBeCloseTo(74.8 * 12);
@@ -214,5 +216,1123 @@ describe("subscriptionsModel.getResumoDetox", () => {
     expect(resumo).toMatchObject({ totalAssinaturas: 3, ativas: 1, canceladas: 2 });
     expect(resumo.gastoMensalAtivo).toBeCloseTo(39.9);
     expect(resumo.economiaMensal).toBeCloseTo(74.8);
+  });
+});
+
+// Sprint 4: os testes que faltavam para as funções da Sprint 3 (concorrentes, custo
+// por uso e tipo) e os das regras novas desta sprint (economia real e acumulada)
+
+const SEED_CONCORRENTES = [
+  { id: 1, nome: "Filmes A", valorMensal: 39.9, ativo: true, categoria: "streaming", tipo: "video" },
+  { id: 2, nome: "Séries B", valorMensal: 34.9, ativo: true, categoria: "streaming", tipo: "video" },
+  { id: 3, nome: "Música C", valorMensal: 21.9, ativo: true, categoria: "streaming", tipo: "musica" },
+  { id: 4, nome: "Tarifa D", valorMensal: 19.9, ativo: true, categoria: "financeiro", tipo: "conta_bancaria" },
+];
+
+describe("subscriptionsModel.detectarRedundancias", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests(SEED_CONCORRENTES);
+  });
+
+  it("agrupa só as assinaturas ativas do mesmo tipo", () => {
+    const resultado = subscriptionsModel.detectarRedundancias();
+
+    expect(resultado.totalGrupos).toBe(1);
+    expect(resultado.grupos[0]).toMatchObject({ tipo: "video", categoria: "streaming", quantidade: 2 });
+    expect(resultado.grupos[0].gastoMensal).toBe(74.8);
+  });
+
+  it("sem verificação de uso, sugere pausar a mais cara", () => {
+    const { sugestaoPausa } = subscriptionsModel.detectarRedundancias().grupos[0];
+
+    expect(sugestaoPausa).toMatchObject({ id: 1, economiaMensal: 39.9, economiaAnual: 478.8 });
+    expect(sugestaoPausa.motivo).toBe("É a mais cara entre serviços que fazem a mesma coisa.");
+  });
+
+  it("quem não foi usado nenhuma vez vem antes da mais cara", () => {
+    subscriptionsModel.calcularCustoUso(2, 0);
+    const { sugestaoPausa } = subscriptionsModel.detectarRedundancias().grupos[0];
+
+    expect(sugestaoPausa.id).toBe(2);
+    expect(sugestaoPausa.motivo).toBe("Você não usou nenhuma vez no último mês.");
+  });
+
+  it("mostra o custo por uso no motivo quando ele é alto", () => {
+    subscriptionsModel.calcularCustoUso(2, 1); // R$ 34,90 por uso: prejuízo
+    const { sugestaoPausa } = subscriptionsModel.detectarRedundancias().grupos[0];
+
+    expect(sugestaoPausa.id).toBe(2);
+    expect(sugestaoPausa.motivo).toContain("R$ 34,90");
+  });
+
+  it("uma verificação excelente tira a mais cara da sugestão", () => {
+    subscriptionsModel.calcularCustoUso(1, 20);
+    expect(subscriptionsModel.detectarRedundancias().grupos[0].sugestaoPausa.id).toBe(2);
+  });
+
+  it("grupo com 3 concorrentes sugere pausar só uma", () => {
+    subscriptionsModel.addSubscription({ nome: "Filmes E", valorMensal: 29.9, categoria: "streaming", tipo: "video" });
+    const resultado = subscriptionsModel.detectarRedundancias();
+
+    expect(resultado.grupos[0].quantidade).toBe(3);
+    expect(resultado.grupos[0].gastoMensal).toBe(104.7);
+    expect(resultado.economiaPotencialMensal).toBe(39.9);
+  });
+
+  it("empate de custo-benefício: sugere a mais cara", () => {
+    subscriptionsModel.calcularCustoUso(1, 4); // neutro
+    subscriptionsModel.calcularCustoUso(2, 3); // neutro
+    expect(subscriptionsModel.detectarRedundancias().grupos[0].sugestaoPausa.id).toBe(1);
+  });
+
+  it("empate também no valor: sugere a cadastrada primeiro", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "A", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "musica" },
+      { id: 2, nome: "B", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "musica" },
+    ]);
+    expect(subscriptionsModel.detectarRedundancias().grupos[0].sugestaoPausa.id).toBe(1);
+  });
+
+  it("assinatura cancelada não entra no grupo", () => {
+    subscriptionsModel.toggleSubscription(1);
+    expect(subscriptionsModel.detectarRedundancias().totalGrupos).toBe(0);
+  });
+
+  it("tipo de outra categoria em 'outros' vira null e não gera alerta", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Clube do Livro", valorMensal: 30, ativo: true, categoria: "outros", tipo: "video" },
+      { id: 2, nome: "Clube do Vinho", valorMensal: 90, ativo: true, categoria: "outros", tipo: "video" },
+    ]);
+
+    expect(subscriptionsModel.getSubscriptions()[0].tipo).toBeNull();
+    expect(subscriptionsModel.detectarRedundancias().totalGrupos).toBe(0);
+  });
+
+  it("soma uma sugestão por grupo e ordena os grupos pelo gasto", () => {
+    subscriptionsModel.addSubscription({ nome: "Música F", valorMensal: 16.9, categoria: "streaming", tipo: "musica" });
+    const resultado = subscriptionsModel.detectarRedundancias();
+
+    expect(resultado.grupos.map((g) => g.tipo)).toEqual(["video", "musica"]);
+    expect(resultado.economiaPotencialMensal).toBe(61.8); // 39,90 + 21,90
+    expect(resultado.economiaPotencialAnual).toBe(741.6);
+  });
+
+  it("devolve cópias das assinaturas do grupo", () => {
+    subscriptionsModel.detectarRedundancias().grupos[0].assinaturas[0].nome = "Alterado";
+    expect(subscriptionsModel.getSubscriptions()[0].nome).toBe("Filmes A");
+  });
+});
+
+// Sem tipo, valem os limites gerais da Sprint 3 (R$ 5 e R$ 15 por uso); a
+// comparação por tipo está nos testes de verificarUso, mais abaixo
+describe("subscriptionsModel.calcularCustoUso", () => {
+  const AGORA = new Date("2026-11-01T15:00:00.000Z");
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Clube", valorMensal: 90, ativo: true },
+      { id: 2, nome: "Cancelada", valorMensal: 30, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+  });
+
+  it("divide a mensalidade pelos usos do mês", () => {
+    expect(subscriptionsModel.calcularCustoUso(1, 3, { agora: AGORA })).toEqual({
+      id: 1,
+      nome: "Clube",
+      valorMensal: 90,
+      forma: "uso",
+      frequenciaUso: 3,
+      custoPorUso: 30,
+      referencia: null,
+      classificacao: "prejuizo",
+      verificadoEm: AGORA.toISOString(),
+      validaAte: "2026-12-01",
+    });
+  });
+
+  it.each([
+    [18, 5, "excelente"], // exatamente no limite de R$ 5
+    [9, 10, "neutro"],
+    [6, 15, "neutro"], // exatamente no limite de R$ 15
+    [5, 18, "prejuizo"],
+  ])("%i usos de R$ 90 = R$ %d por uso: %s", (usos, custo, classificacao) => {
+    const resultado = subscriptionsModel.calcularCustoUso(1, usos);
+    expect(resultado.custoPorUso).toBe(custo);
+    expect(resultado.classificacao).toBe(classificacao);
+  });
+
+  it("1 uso: o custo por uso é a mensalidade inteira", () => {
+    expect(subscriptionsModel.calcularCustoUso(1, 1).custoPorUso).toBe(90);
+  });
+
+  it("0 usos: sem custo por uso e classificado como prejuízo", () => {
+    const resultado = subscriptionsModel.calcularCustoUso(1, 0);
+    expect(resultado.custoPorUso).toBeNull();
+    expect(resultado.classificacao).toBe("prejuizo");
+  });
+
+  it("1000 usos: centavos por uso e excelente", () => {
+    const resultado = subscriptionsModel.calcularCustoUso(1, 1000);
+    expect(resultado.custoPorUso).toBe(0.09);
+    expect(resultado.classificacao).toBe("excelente");
+  });
+
+  it("grava a verificação na assinatura sem vazar referência", () => {
+    subscriptionsModel.calcularCustoUso(1, 3, { agora: AGORA });
+    subscriptionsModel.getSubscriptions()[0].usoMensal.custoPorUso = 0;
+
+    expect(subscriptionsModel.getSubscriptions()[0].usoMensal).toMatchObject({
+      frequenciaUso: 3,
+      custoPorUso: 30,
+      verificadoEm: AGORA.toISOString(),
+    });
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.calcularCustoUso(999, 3)).toBeNull();
+  });
+
+  it("recusa assinatura cancelada e não grava nada", () => {
+    expect(subscriptionsModel.calcularCustoUso(2, 3)).toEqual({
+      erro: "A assinatura 'Cancelada' está cancelada. Reative-a para verificar o uso.",
+    });
+    expect(subscriptionsModel.getSubscriptions()[1].usoMensal).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.addSubscription (tipo)", () => {
+  it("mantém o tipo que pertence à categoria", () => {
+    const nova = subscriptionsModel.addSubscription({ nome: "Spotify", valorMensal: 21.9, categoria: "streaming", tipo: "musica" });
+    expect(nova.tipo).toBe("musica");
+  });
+
+  it("descarta o tipo que é de outra categoria", () => {
+    const nova = subscriptionsModel.addSubscription({ nome: "X", valorMensal: 10, categoria: "saude", tipo: "video" });
+    expect(nova.tipo).toBeNull();
+  });
+
+  it("sem categoria, deduz a categoria pelo tipo", () => {
+    const nova = subscriptionsModel.addSubscription({ nome: "Netflix", valorMensal: 39.9, tipo: "video" });
+    expect(nova).toMatchObject({ categoria: "streaming", tipo: "video" });
+  });
+
+  it("sem categoria e com tipo inexistente, fica em 'outros' sem tipo", () => {
+    const nova = subscriptionsModel.addSubscription({ nome: "X", valorMensal: 10, tipo: "xyz" });
+    expect(nova).toMatchObject({ categoria: "outros", tipo: null });
+  });
+});
+
+describe("subscriptionsModel: economia real", () => {
+  const AGORA = new Date("2026-11-01T15:00:00.000Z");
+
+  it("não conta inativa sem canceladaEm (o usuário nunca a cancelou)", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Nunca cancelada", valorMensal: 50, ativo: false },
+      { id: 2, nome: "Cancelada", valorMensal: 10, ativo: false, canceladaEm: "2026-10-20T15:00:00.000Z" },
+    ]);
+
+    expect(subscriptionsModel.getEconomiaTotal({ agora: AGORA })).toMatchObject({
+      economiaMensal: 10,
+      economiaAnual: 120,
+    });
+  });
+
+  it("o seed da demo traz as inativas com data de cancelamento e evento no histórico", () => {
+    subscriptionsModel._resetForTests(undefined, { agora: AGORA });
+
+    // Academia (R$ 49,90) cancelada há 75 dias: 2 cobranças puladas.
+    // Nuvem (R$ 9,90), há 130 dias: 4 cobranças puladas.
+    expect(subscriptionsModel.getEconomiaTotal({ agora: AGORA })).toEqual({
+      economiaMensal: 59.8,
+      economiaAnual: 717.6,
+      economiaAcumulada: 139.4,
+    });
+    expect(subscriptionsModel.getAuditoria().map((e) => [e.nome, e.acao])).toEqual([
+      ["Academia Online", "cancelada"],
+      ["Aplicativo de Nuvem (Storage)", "cancelada"],
+    ]);
+  });
+});
+
+describe("subscriptionsModel: economia acumulada", () => {
+  // Meio-dia em Brasília do dia informado
+  const em = (data) => ({ agora: new Date(`${data}T15:00:00.000Z`) });
+  const acumuladaEm = (data) => subscriptionsModel.getEconomiaTotal(em(data)).economiaAcumulada;
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "Netflix", valorMensal: 39.9, ativo: true }]);
+  });
+
+  it("conta as cobranças que deixaram de acontecer desde o cancelamento", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+    expect(acumuladaEm("2026-04-20")).toBe(119.7); // 15/02, 15/03 e 15/04
+  });
+
+  it("a cobrança de hoje já conta; a de amanhã ainda não", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+    expect(acumuladaEm("2026-02-14")).toBe(0);
+    expect(acumuladaEm("2026-02-15")).toBe(39.9);
+  });
+
+  it("cancelar, reativar e cancelar de novo não conta em dobro", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15")); // cancela
+    subscriptionsModel.toggleSubscription(1, em("2026-03-15")); // reativa: a cobrança de 15/03 volta
+    subscriptionsModel.toggleSubscription(1, em("2026-03-15")); // cancela de novo no mesmo dia
+
+    // 15/02 no primeiro período; 15/04 e 15/05 no segundo
+    expect(acumuladaEm("2026-05-20")).toBe(119.7);
+  });
+
+  it("reativada continua no acumulado, mas sai da economia mensal", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+    subscriptionsModel.toggleSubscription(1, em("2026-04-01"));
+
+    expect(subscriptionsModel.getEconomiaTotal(em("2026-06-01"))).toEqual({
+      economiaMensal: 0,
+      economiaAnual: 0,
+      economiaAcumulada: 79.8, // 15/02 e 15/03
+    });
+  });
+
+  it("reativar antes da próxima cobrança não gera economia", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+    subscriptionsModel.toggleSubscription(1, em("2026-02-10"));
+    expect(acumuladaEm("2026-06-01")).toBe(0);
+  });
+
+  it("usa o dia do cancelamento no horário de Brasília", () => {
+    // 02h UTC de 31/01 ainda é dia 30 em Brasília: as cobranças cairiam no dia 30
+    subscriptionsModel.toggleSubscription(1, { agora: new Date("2026-01-31T02:00:00.000Z") });
+    expect(acumuladaEm("2026-03-30")).toBe(79.8); // 28/02 e 30/03
+  });
+
+  it("dia 31 em fevereiro, em abril e na virada do ano", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-12-31"));
+    expect(acumuladaEm("2027-02-28")).toBe(79.8); // 31/01 e 28/02 (2027 não é bissexto)
+    expect(acumuladaEm("2027-04-30")).toBe(159.6); // + 31/03 e 30/04
+  });
+
+  it("dia 31 em fevereiro de ano bissexto cai no dia 29", () => {
+    subscriptionsModel.toggleSubscription(1, em("2028-01-31"));
+    expect(acumuladaEm("2028-02-28")).toBe(0);
+    expect(acumuladaEm("2028-02-29")).toBe(39.9);
+  });
+
+  it("cada assinatura informa quanto já economizou", () => {
+    subscriptionsModel.addSubscription({ nome: "Spotify", valorMensal: 21.9 });
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+
+    const lista = subscriptionsModel.getSubscriptions(em("2026-03-20"));
+    expect(lista.map((s) => s.economizadoAteHoje)).toEqual([79.8, 0]);
+  });
+
+  it("não expõe os períodos internos na API", () => {
+    const cancelada = subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+
+    expect(cancelada).not.toHaveProperty("periodosSemCobranca");
+    expect(subscriptionsModel.getSubscriptions()[0]).not.toHaveProperty("periodosSemCobranca");
+  });
+
+  it("o resumo para outros módulos também traz a economia acumulada", () => {
+    subscriptionsModel.toggleSubscription(1, em("2026-01-15"));
+    expect(subscriptionsModel.getResumoDetox(em("2026-02-15")).economiaAcumulada).toBe(39.9);
+  });
+});
+
+// Sprint 4: ciclos, plano dividido, calendário de cobranças, status, edição e exclusão
+
+// Meio-dia em Brasília do dia informado
+const em = (data) => ({ agora: new Date(`${data}T15:00:00.000Z`) });
+
+describe("subscriptionsModel: ciclo e plano dividido", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([]);
+  });
+
+  it.each([
+    ["semanal", 10, 43.33],
+    ["mensal", 39.9, 39.9],
+    ["trimestral", 90, 30],
+    ["semestral", 60, 10],
+    ["anual", 119.9, 9.99],
+  ])("ciclo %s: cobrança de R$ %s equivale a R$ %s por mês", (ciclo, valorCobrado, valorMensal) => {
+    const nova = subscriptionsModel.addSubscription({ nome: "X", valorCobrado, ciclo }, em("2026-11-01"));
+    expect(nova).toMatchObject({ ciclo, valorCobrado, valorMensal });
+  });
+
+  it("plano dividido: os cálculos usam a sua parte", () => {
+    subscriptionsModel.addSubscription({ nome: "Família", valorCobrado: 60, compartilhadaCom: 2 }, em("2026-11-01"));
+
+    expect(subscriptionsModel.getSubscriptions(em("2026-11-01"))[0]).toMatchObject({
+      valorCobrado: 60,
+      compartilhadaCom: 2,
+      valorMensal: 20,
+    });
+    expect(subscriptionsModel.calcularCustoInvisivel(em("2026-11-01")).gastoMensal).toBe(20);
+  });
+
+  it("dado antigo, só com valorMensal, continua mensal e sem divisão", () => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "Antiga", valorMensal: 39.9, ativo: true }]);
+
+    expect(subscriptionsModel.getSubscriptions(em("2026-11-01"))[0]).toMatchObject({
+      status: "ativa",
+      ciclo: "mensal",
+      valorCobrado: 39.9,
+      valorMensal: 39.9,
+      compartilhadaCom: 0,
+      proximaCobranca: null,
+    });
+  });
+
+  it("recusa valor que equivale a mais de R$ 10.000 por mês", () => {
+    const resultado = subscriptionsModel.addSubscription({ nome: "X", valorCobrado: 2400, ciclo: "semanal" });
+
+    expect(resultado.erro).toContain("R$ 10.000");
+    expect(subscriptionsModel.getSubscriptions()).toHaveLength(0);
+  });
+
+  it("começa o histórico de preços com o valor do cadastro", () => {
+    const nova = subscriptionsModel.addSubscription({ nome: "X", valorCobrado: 50, ciclo: "anual" }, em("2026-11-01"));
+    expect(nova.historicoPrecos).toEqual([{ valor: 50, ciclo: "anual", desde: "2026-11-01" }]);
+  });
+});
+
+describe("subscriptionsModel: próxima cobrança", () => {
+  const proximaEm = (data) => subscriptionsModel.getSubscriptions(em(data))[0].proximaCobranca;
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([]);
+  });
+
+  it("mensal no dia 31: virada do ano, fevereiro (comum e bissexto) e abril", () => {
+    subscriptionsModel.addSubscription({ nome: "X", valorMensal: 10, diaCobranca: 31 }, em("2026-12-10"));
+
+    expect(proximaEm("2026-12-10")).toBe("2026-12-31");
+    expect(proximaEm("2027-01-01")).toBe("2027-01-31");
+    expect(proximaEm("2027-02-01")).toBe("2027-02-28");
+    expect(proximaEm("2027-04-01")).toBe("2027-04-30");
+    expect(proximaEm("2028-02-01")).toBe("2028-02-29");
+  });
+
+  it("a cobrança de hoje ainda é a próxima", () => {
+    subscriptionsModel.addSubscription({ nome: "X", valorMensal: 10, diaCobranca: 15 }, em("2026-11-01"));
+
+    expect(proximaEm("2026-11-15")).toBe("2026-11-15");
+    expect(proximaEm("2026-11-16")).toBe("2026-12-15");
+  });
+
+  it("anual: cobra no mês certo e depois só no ano seguinte", () => {
+    subscriptionsModel.addSubscription(
+      { nome: "Anual", valorCobrado: 120, ciclo: "anual", proximaCobranca: "2026-11-20" },
+      em("2026-11-01")
+    );
+
+    expect(proximaEm("2026-11-01")).toBe("2026-11-20"); // no mês atual
+    expect(proximaEm("2026-11-21")).toBe("2027-11-20"); // fora dele
+  });
+
+  it("semanal: de 7 em 7 dias, sem dia do mês", () => {
+    subscriptionsModel.addSubscription(
+      { nome: "Revista", valorCobrado: 10, ciclo: "semanal", proximaCobranca: "2026-11-03" },
+      em("2026-11-01")
+    );
+
+    expect(proximaEm("2026-11-04")).toBe("2026-11-10");
+    expect(subscriptionsModel.getSubscriptions()[0].diaCobranca).toBeNull();
+  });
+
+  it("sem dia nem data de cobrança, não há próxima cobrança", () => {
+    subscriptionsModel.addSubscription({ nome: "X", valorMensal: 10 }, em("2026-11-01"));
+    expect(proximaEm("2026-11-01")).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.alterarStatus", () => {
+  const assinaturaEm = (data) => subscriptionsModel.getSubscriptions(em(data))[0];
+
+  beforeEach(() => {
+    // Cobrada todo dia 15
+    subscriptionsModel._resetForTests([
+      {
+        id: 1,
+        nome: "Netflix",
+        valorMensal: 39.9,
+        ativo: true,
+        categoria: "streaming",
+        tipo: "video",
+        dataBaseCobranca: "2026-01-15",
+        diaCobranca: 15,
+      },
+    ]);
+  });
+
+  it("pausar tira dos gastos sem virar economia recorrente", () => {
+    const pausada = subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-10" }, em("2026-01-10"));
+
+    expect(pausada).toMatchObject({
+      status: "pausada",
+      ativo: false,
+      pausadaAte: "2026-03-10",
+      proximaCobranca: "2026-03-15",
+    });
+    expect(subscriptionsModel.calcularCustoInvisivel(em("2026-01-10")).gastoMensal).toBe(0);
+    expect(subscriptionsModel.getEconomiaTotal(em("2026-01-10")).economiaMensal).toBe(0);
+  });
+
+  it("a pausa volta sozinha na data, e as cobranças puladas viram economia acumulada", () => {
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-10" }, em("2026-01-10"));
+
+    expect(assinaturaEm("2026-03-09").status).toBe("pausada");
+    expect(assinaturaEm("2026-03-10").status).toBe("ativa");
+    // 15/01 e 15/02 não foram cobradas; a de 15/03 já é depois da volta
+    expect(subscriptionsModel.getEconomiaTotal(em("2026-04-01")).economiaAcumulada).toBe(79.8);
+    expect(subscriptionsModel.getAuditoria(em("2026-04-01"))[0]).toMatchObject({
+      acao: "retomada",
+      data: "2026-03-10T03:00:00.000Z",
+    });
+  });
+
+  it("pausa com a data de volta no passado já aparece como ativa", () => {
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-02-01" }, em("2026-01-10"));
+    expect(assinaturaEm("2026-05-01")).toMatchObject({ status: "ativa", ativo: true, pausadaAte: null });
+  });
+
+  it("teste grátis que termina hoje vira ativa, com a primeira cobrança hoje", () => {
+    subscriptionsModel._resetForTests([]);
+    subscriptionsModel.addSubscription(
+      { nome: "Idiomas", valorCobrado: 34.9, status: "teste", fimTeste: "2026-11-05" },
+      em("2026-11-01")
+    );
+
+    expect(assinaturaEm("2026-11-04")).toMatchObject({ status: "teste", proximaCobranca: "2026-11-05" });
+    expect(subscriptionsModel.calcularCustoInvisivel(em("2026-11-04")).gastoMensal).toBe(0);
+    expect(assinaturaEm("2026-11-05")).toMatchObject({ status: "ativa", fimTeste: null, proximaCobranca: "2026-11-05" });
+    expect(subscriptionsModel.getAuditoria(em("2026-11-05"))[0].acao).toBe("teste_encerrado");
+  });
+
+  it("cancelar o teste antes do fim evita a primeira cobrança", () => {
+    subscriptionsModel._resetForTests([]);
+    subscriptionsModel.addSubscription(
+      { nome: "Idiomas", valorCobrado: 34.9, status: "teste", fimTeste: "2026-11-05" },
+      em("2026-11-01")
+    );
+    subscriptionsModel.alterarStatus(1, { status: "cancelada" }, em("2026-11-02"));
+
+    expect(subscriptionsModel.getEconomiaTotal(em("2026-11-06"))).toEqual({
+      economiaMensal: 34.9,
+      economiaAnual: 418.8,
+      economiaAcumulada: 34.9,
+    });
+  });
+
+  it("repetir o status devolve erro, mas trocar a data da pausa vale (sem contar em dobro)", () => {
+    expect(subscriptionsModel.alterarStatus(1, { status: "ativa" }, em("2026-01-10"))).toEqual({
+      erro: "A assinatura 'Netflix' já está ativa.",
+    });
+
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-02-01" }, em("2026-01-10"));
+    const estendida = subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-01" }, em("2026-01-11"));
+
+    expect(estendida.pausadaAte).toBe("2026-03-01");
+    expect(subscriptionsModel.getEconomiaTotal(em("2026-04-01")).economiaAcumulada).toBe(79.8); // 15/01 e 15/02
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.alterarStatus(999, { status: "cancelada" })).toBeNull();
+  });
+
+  it("o toggle antigo reativa uma pausada", () => {
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-01" }, em("2026-01-10"));
+
+    expect(subscriptionsModel.toggleSubscription(1, em("2026-01-20"))).toMatchObject({ status: "ativa", ativo: true });
+    expect(subscriptionsModel.getAuditoria(em("2026-01-20"))[0].acao).toBe("retomada");
+  });
+
+  it("registra na auditoria a ação certa de cada mudança", () => {
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-01" }, em("2026-01-10"));
+    subscriptionsModel.alterarStatus(1, { status: "cancelada" }, em("2026-01-11"));
+    subscriptionsModel.alterarStatus(1, { status: "ativa" }, em("2026-01-12"));
+
+    const auditoria = subscriptionsModel.getAuditoria(em("2026-01-12"));
+    expect(auditoria.map((e) => e.acao)).toEqual(["reativada", "cancelada", "pausada"]);
+    expect(auditoria[2].pausadaAte).toBe("2026-03-01");
+  });
+
+  it("pausada sai do detector de concorrentes; teste grátis entra", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 39.9, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 2, nome: "Séries", valorMensal: 34.9, ativo: true, categoria: "streaming", tipo: "video" },
+    ]);
+
+    subscriptionsModel.alterarStatus(2, { status: "pausada", pausadaAte: "2026-03-01" }, em("2026-01-10"));
+    expect(subscriptionsModel.detectarRedundancias(em("2026-01-10")).totalGrupos).toBe(0);
+
+    subscriptionsModel.alterarStatus(2, { status: "teste", fimTeste: "2026-02-01" }, em("2026-01-11"));
+    expect(subscriptionsModel.detectarRedundancias(em("2026-01-11")).grupos[0].quantidade).toBe(2);
+  });
+
+  it("quando a sugestão é um teste grátis, o motivo fala em cancelar antes de cobrar", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 29.9, ativo: true, categoria: "streaming", tipo: "video" },
+    ]);
+    subscriptionsModel.addSubscription(
+      { nome: "Séries", valorCobrado: 44.9, tipo: "video", status: "teste", fimTeste: "2026-02-08" },
+      em("2026-02-01")
+    );
+
+    const { sugestaoPausa } = subscriptionsModel.detectarRedundancias(em("2026-02-01")).grupos[0];
+    expect(sugestaoPausa).toMatchObject({ id: 2, status: "teste" });
+    expect(sugestaoPausa.motivo).toBe(
+      "Ainda está no teste grátis: cancelando antes de 08/02, a primeira cobrança não acontece."
+    );
+  });
+
+  it("custo por uso: teste grátis pode, pausada não", () => {
+    subscriptionsModel.addSubscription(
+      { nome: "Teste", valorCobrado: 30, status: "teste", fimTeste: "2026-02-01" },
+      em("2026-01-10")
+    );
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-03-01" }, em("2026-01-10"));
+
+    expect(subscriptionsModel.calcularCustoUso(2, 3, em("2026-01-10")).custoPorUso).toBe(10);
+    expect(subscriptionsModel.calcularCustoUso(1, 3, em("2026-01-10")).erro).toBe(
+      "A assinatura 'Netflix' está pausada. Retome-a para verificar o uso."
+    );
+  });
+});
+
+describe("subscriptionsModel.updateSubscription", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Netflix", valorMensal: 39.9, ativo: true, categoria: "streaming", tipo: "video" },
+    ]);
+  });
+
+  it("edita nome, categoria e tipo", () => {
+    const editada = subscriptionsModel.updateSubscription(
+      1,
+      { nome: "  Spotify ", categoria: "streaming", tipo: "musica" },
+      em("2026-11-01")
+    );
+    expect(editada).toMatchObject({ nome: "Spotify", categoria: "streaming", tipo: "musica" });
+  });
+
+  it("trocar só a categoria descarta o tipo que não serve mais", () => {
+    expect(subscriptionsModel.updateSubscription(1, { categoria: "saude" }, em("2026-11-01"))).toMatchObject({
+      categoria: "saude",
+      tipo: null,
+    });
+  });
+
+  it("mudança de valor entra no histórico de preços e na auditoria", () => {
+    const editada = subscriptionsModel.updateSubscription(1, { valorCobrado: 44.9 }, em("2026-11-01"));
+
+    expect(editada.valorMensal).toBe(44.9);
+    expect(editada.historicoPrecos).toEqual([
+      { valor: 39.9, ciclo: "mensal", desde: null },
+      { valor: 44.9, ciclo: "mensal", desde: "2026-11-01" },
+    ]);
+    expect(subscriptionsModel.getAuditoria(em("2026-11-01"))[0]).toMatchObject({
+      acao: "preco_alterado",
+      valorAnterior: 39.9,
+      valorMensal: 44.9,
+    });
+  });
+
+  it("mudar a divisão muda a sua parte sem mexer no histórico de preços", () => {
+    const editada = subscriptionsModel.updateSubscription(1, { compartilhadaCom: 1 }, em("2026-11-01"));
+
+    expect(editada.valorMensal).toBe(19.95);
+    expect(editada.historicoPrecos).toHaveLength(1);
+    expect(subscriptionsModel.getAuditoria(em("2026-11-01"))).toHaveLength(0);
+  });
+
+  it("cadastra o dia de cobrança depois", () => {
+    expect(subscriptionsModel.updateSubscription(1, { diaCobranca: 20 }, em("2026-11-01"))).toMatchObject({
+      diaCobranca: 20,
+      proximaCobranca: "2026-11-20",
+    });
+  });
+
+  it("recusa dia de cobrança sem data num ciclo que não é mensal", () => {
+    const resultado = subscriptionsModel.updateSubscription(
+      1,
+      { ciclo: "anual", valorCobrado: 400, diaCobranca: 10 },
+      em("2026-11-01")
+    );
+    expect(resultado.erro).toContain("proximaCobranca");
+  });
+
+  it("recusa valor acima do teto sem alterar nada", () => {
+    expect(subscriptionsModel.updateSubscription(1, { valorCobrado: 10000.01 }).erro).toContain("R$ 10.000");
+    expect(subscriptionsModel.getSubscriptions()[0].valorCobrado).toBe(39.9);
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.updateSubscription(999, { nome: "X" })).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.removeSubscription", () => {
+  it("remove o cadastro, registra na auditoria e tira da economia", () => {
+    const removida = subscriptionsModel.removeSubscription(2);
+
+    expect(removida.nome).toBe("Academia Online");
+    expect(subscriptionsModel.getSubscriptions().map((s) => s.id)).toEqual([1, 3]);
+    expect(subscriptionsModel.getEconomiaTotal().economiaMensal).toBe(24.9);
+    expect(subscriptionsModel.getAuditoria()[0]).toMatchObject({ assinaturaId: 2, acao: "removida" });
+  });
+
+  it("não reaproveita o id de uma assinatura removida", () => {
+    subscriptionsModel.removeSubscription(3);
+    expect(subscriptionsModel.addSubscription({ nome: "Nova", valorMensal: 10 }).id).toBe(4);
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.removeSubscription(999)).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.getProximasCobrancas", () => {
+  it("lista as cobranças da janela em ordem, com o total", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 39.9, ativo: true, dataBaseCobranca: "2026-01-05", diaCobranca: 5 },
+      { id: 2, nome: "Música", valorMensal: 21.9, ativo: true, dataBaseCobranca: "2026-01-03", diaCobranca: 3 },
+      { id: 3, nome: "Longe", valorMensal: 10, ativo: true, dataBaseCobranca: "2026-01-25", diaCobranca: 25 },
+    ]);
+    const proximas = subscriptionsModel.getProximasCobrancas({ dias: 7, ...em("2026-11-01") });
+
+    expect(proximas).toMatchObject({ dias: 7, de: "2026-11-01", ate: "2026-11-08", total: 61.8, semData: 0 });
+    expect(proximas.itens).toEqual([
+      { id: 2, nome: "Música", data: "2026-11-03", diasRestantes: 2, valor: 21.9, suaParte: 21.9, tipo: "cobranca" },
+      { id: 1, nome: "Filmes", data: "2026-11-05", diasRestantes: 4, valor: 39.9, suaParte: 39.9, tipo: "cobranca" },
+    ]);
+  });
+
+  it("semanal aparece mais de uma vez na janela", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Revista", valorCobrado: 5, ciclo: "semanal", ativo: true, dataBaseCobranca: "2026-11-02" },
+    ]);
+    const { itens } = subscriptionsModel.getProximasCobrancas({ dias: 14, ...em("2026-11-01") });
+    expect(itens.map((i) => i.data)).toEqual(["2026-11-02", "2026-11-09"]);
+  });
+
+  it("mostra o fim do teste grátis e a volta da pausa", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 39.9, ativo: true, dataBaseCobranca: "2026-01-05", diaCobranca: 5 },
+    ]);
+    subscriptionsModel.addSubscription(
+      { nome: "Idiomas", valorCobrado: 34.9, status: "teste", fimTeste: "2026-11-04" },
+      em("2026-11-01")
+    );
+    subscriptionsModel.alterarStatus(1, { status: "pausada", pausadaAte: "2026-11-03" }, em("2026-11-01"));
+
+    const { itens } = subscriptionsModel.getProximasCobrancas(em("2026-11-01"));
+    expect(itens.map((i) => [i.nome, i.data, i.tipo])).toEqual([
+      ["Idiomas", "2026-11-04", "fim_teste"],
+      ["Filmes", "2026-11-05", "retomada"],
+    ]);
+  });
+
+  it("cancelada fica de fora e quem não tem data conta em semData", () => {
+    // SEED: uma ativa sem data de cobrança e duas canceladas
+    expect(subscriptionsModel.getProximasCobrancas(em("2026-11-01"))).toMatchObject({
+      semData: 1,
+      itens: [],
+      total: 0,
+    });
+  });
+
+  it("plano dividido mostra a sua parte da cobrança", () => {
+    subscriptionsModel._resetForTests([]);
+    subscriptionsModel.addSubscription(
+      { nome: "Família", valorCobrado: 60, compartilhadaCom: 2, diaCobranca: 2 },
+      em("2026-11-01")
+    );
+    expect(subscriptionsModel.getProximasCobrancas(em("2026-11-01")).itens[0]).toMatchObject({
+      valor: 60,
+      suaParte: 20,
+    });
+  });
+
+  it("a demo tem cobranças e um fim de teste na próxima semana", () => {
+    subscriptionsModel._resetForTests(undefined, em("2026-11-01"));
+    const proximas = subscriptionsModel.getProximasCobrancas(em("2026-11-01"));
+
+    expect(proximas.itens.map((i) => i.tipo)).toEqual(["cobranca", "cobranca", "fim_teste", "cobranca"]);
+    expect(proximas.total).toBe(129.6);
+  });
+});
+
+describe("subscriptionsModel.getMeta", () => {
+  it("traz categorias com tipos e rótulos, ciclos, status, limites e checklist", () => {
+    const meta = subscriptionsModel.getMeta();
+
+    expect(meta.categorias.map((c) => c.valor)).toEqual(subscriptionsModel.CATEGORIAS);
+    expect(meta.categorias[0]).toEqual({
+      valor: "streaming",
+      rotulo: "Streaming",
+      tipos: [
+        {
+          valor: "video",
+          rotulo: "Vídeo",
+          descricao: "streaming de vídeo",
+          verificacao: { forma: "uso", referencia: 15, explicacao: "Alugar um filme custa cerca de R$ 15." },
+        },
+        {
+          valor: "musica",
+          rotulo: "Música",
+          descricao: "streaming de música",
+          verificacao: { forma: "uso", referencia: 5, explicacao: expect.any(String) },
+        },
+      ],
+    });
+    expect(meta.ciclos.find((c) => c.valor === "anual")).toEqual({ valor: "anual", rotulo: "Anual", frase: "por ano" });
+    expect(meta.status.map((s) => s.valor)).toEqual(["ativa", "teste", "pausada", "cancelada"]);
+    expect(meta.limites).toEqual({
+      valorMensalMaximo: 10000,
+      nomeMaximo: 60,
+      compartilhadaComMaximo: 20,
+      limitePercentualRendaMaximo: 50,
+    });
+    expect(meta.verificacaoSemTipo).toMatchObject({ forma: "uso", referencia: null });
+  });
+
+  it("todo item do checklist tem categoria e tipo que existem", () => {
+    subscriptionsModel.getMeta().checklist.forEach((item) => {
+      const tiposDaCategoria = subscriptionsModel.TIPOS_POR_CATEGORIA[item.categoria];
+      expect(tiposDaCategoria).toBeDefined();
+      expect(item.tipo === null || tiposDaCategoria.includes(item.tipo)).toBe(true);
+    });
+  });
+});
+
+// Sprint 4: custo por uso justo, eficiência, limite de gasto, revisão do mês,
+// guia de cancelamento, catálogo no cadastro e projeções com IR e reajuste
+
+describe("subscriptionsModel.verificarUso", () => {
+  const AGORA = new Date("2026-11-01T15:00:00.000Z");
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Academia", valorMensal: 90, ativo: true, categoria: "saude", tipo: "academia" },
+      { id: 2, nome: "Música", valorMensal: 30, ativo: true, categoria: "streaming", tipo: "musica" },
+      { id: 3, nome: "Seguro", valorMensal: 24.9, ativo: true, categoria: "financeiro", tipo: "seguro" },
+      { id: 4, nome: "Plano", valorMensal: 300, ativo: true, categoria: "saude", tipo: "plano_saude" },
+    ]);
+  });
+
+  it.each([
+    [6, 15, "excelente"], // metade da diária de academia (R$ 30) ou menos
+    [3, 30, "neutro"], // o mesmo que uma diária
+    [2, 45, "prejuizo"],
+  ])("academia: %i idas de R$ 90 = R$ %s por ida: %s", (usos, custo, classificacao) => {
+    expect(subscriptionsModel.verificarUso(1, { frequenciaUso: usos })).toMatchObject({
+      custoPorUso: custo,
+      referencia: 30,
+      classificacao,
+    });
+  });
+
+  it("R$ 15 por uso é ótimo na academia e ruim na música", () => {
+    expect(subscriptionsModel.verificarUso(1, { frequenciaUso: 6 }).classificacao).toBe("excelente");
+    expect(subscriptionsModel.verificarUso(2, { frequenciaUso: 2 }).classificacao).toBe("prejuizo");
+  });
+
+  it("seguro: responde a pergunta do tipo em vez de contar usos", () => {
+    expect(subscriptionsModel.verificarUso(3, { resposta: true }, { agora: AGORA })).toMatchObject({
+      forma: "pergunta",
+      pergunta: "Você acionou este seguro nos últimos 12 meses?",
+      resposta: true,
+      classificacao: "neutro",
+    });
+    expect(subscriptionsModel.verificarUso(3, { resposta: false }).classificacao).toBe("prejuizo");
+    expect(subscriptionsModel.verificarUso(3, { frequenciaUso: 3 }).erro).toContain("'resposta'");
+  });
+
+  it("tipo com uso exige frequenciaUso", () => {
+    expect(subscriptionsModel.verificarUso(1, { resposta: true }).erro).toContain("'frequenciaUso'");
+  });
+
+  it("plano de saúde não tem verificação de uso", () => {
+    expect(subscriptionsModel.verificarUso(4, { frequenciaUso: 1 }).erro).toContain("não mede custo por uso");
+  });
+
+  it("a verificação vale 30 dias e depois aparece como vencida", () => {
+    subscriptionsModel.verificarUso(1, { frequenciaUso: 3 }, { agora: AGORA });
+
+    expect(subscriptionsModel.getSubscriptions(em("2026-12-01"))[0].usoMensal).toMatchObject({
+      validaAte: "2026-12-01",
+      vencida: false,
+    });
+    expect(subscriptionsModel.getSubscriptions(em("2026-12-02"))[0].usoMensal.vencida).toBe(true);
+  });
+
+  it("guarda o histórico das 12 verificações mais recentes", () => {
+    for (let usos = 1; usos <= 14; usos += 1) subscriptionsModel.verificarUso(1, { frequenciaUso: usos });
+    const { historicoUso } = subscriptionsModel.getSubscriptions()[0];
+
+    expect(historicoUso).toHaveLength(12);
+    expect(historicoUso[0].frequenciaUso).toBe(3);
+    expect(historicoUso[11].frequenciaUso).toBe(14);
+  });
+
+  it("verificação vencida não decide mais a sugestão de pausa", () => {
+    subscriptionsModel._resetForTests(SEED_CONCORRENTES);
+    subscriptionsModel.verificarUso(2, { frequenciaUso: 0 }, em("2026-11-01"));
+
+    expect(subscriptionsModel.detectarRedundancias(em("2026-11-15")).grupos[0].sugestaoPausa.id).toBe(2);
+    expect(subscriptionsModel.detectarRedundancias(em("2026-12-15")).grupos[0].sugestaoPausa).toMatchObject({
+      id: 1,
+      motivo: "É a mais cara entre serviços que fazem a mesma coisa.",
+    });
+  });
+});
+
+describe("subscriptionsModel: score de eficiência e horas de trabalho", () => {
+  const PERFIL = { valorHora: 20, salario: 4000 };
+  const lista = (data = "2026-11-01") => subscriptionsModel.getSubscriptions({ perfil: PERFIL, ...em(data) });
+  const eficienciaDe = (id) => lista().find((s) => s.id === id).eficiencia;
+
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 40, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 2, nome: "Séries", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 3, nome: "Plano", valorMensal: 400, ativo: true, categoria: "saude", tipo: "plano_saude" },
+      { id: 4, nome: "Antiga", valorMensal: 10, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+  });
+
+  it("perde pontos por falta de verificação, concorrência e peso na renda", () => {
+    expect(eficienciaDe(1)).toEqual({
+      score: 62,
+      nivel: "atencao",
+      fatores: [
+        { fator: "sem_verificacao", pontos: -10, motivo: "Uso não verificado nos últimos 30 dias" },
+        { fator: "concorrente", pontos: -20, motivo: "Outro serviço ativo faz a mesma coisa" },
+        { fator: "renda", pontos: -8, motivo: "Consome 1,0% da sua renda" },
+      ],
+    });
+  });
+
+  it("custo-benefício excelente não perde pontos; prejuízo perde 40", () => {
+    subscriptionsModel.verificarUso(1, { frequenciaUso: 20 }, em("2026-11-01")); // R$ 2 por uso
+    subscriptionsModel.verificarUso(2, { frequenciaUso: 0 }, em("2026-11-01"));
+
+    expect(eficienciaDe(1)).toMatchObject({ score: 72, nivel: "bom" }); // -20 concorrente, -8 renda
+    expect(eficienciaDe(2)).toMatchObject({ score: 36, nivel: "ruim" }); // -40, -20, -4
+  });
+
+  it("plano de saúde não perde por falta de verificação, e o peso na renda tem teto de 20", () => {
+    expect(eficienciaDe(3)).toMatchObject({ score: 80, nivel: "bom" }); // 10% da renda daria 80 pontos
+  });
+
+  it("cancelada não tem score; as horas vêm do valor-hora do Perfil", () => {
+    expect(lista().find((s) => s.id === 4).eficiencia).toBeNull();
+    expect(lista().find((s) => s.id === 1).horasDeTrabalho).toBe(2); // R$ 40 / R$ 20 por hora
+  });
+
+  it("sem valor-hora nem salário no Perfil, não há horas nem ponto de renda", () => {
+    const [primeira] = subscriptionsModel.getSubscriptions({ perfil: { valorHora: 0, salario: 0 } });
+
+    expect(primeira.horasDeTrabalho).toBeNull();
+    expect(primeira.eficiencia.fatores.map((f) => f.fator)).not.toContain("renda");
+  });
+
+  it("sem Perfil, a lista não traz horas nem score", () => {
+    expect(subscriptionsModel.getSubscriptions()[0]).not.toHaveProperty("eficiencia");
+  });
+});
+
+describe("subscriptionsModel: limite de gasto com assinaturas", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "A", valorMensal: 100, ativo: true },
+      { id: 2, nome: "B", valorMensal: 50, ativo: true },
+    ]);
+  });
+
+  it("compara o gasto com a meta padrão de 5% da renda", () => {
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 4000 })).toEqual({
+      limitePercentual: 5,
+      gastoMensal: 150,
+      salario: 4000,
+      limiteMensal: 200,
+      percentualAtual: 3.75,
+      acimaDoLimite: false,
+    });
+  });
+
+  it("avisa quando passa da meta escolhida", () => {
+    subscriptionsModel.atualizarConfiguracoes({ limitePercentualRenda: 3 });
+
+    expect(subscriptionsModel.getConfiguracoes()).toEqual({ limitePercentualRenda: 3 });
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 4000 })).toMatchObject({
+      limiteMensal: 120,
+      acimaDoLimite: true,
+    });
+  });
+
+  it("sem salário no Perfil, os valores que dependem dele ficam nulos", () => {
+    expect(subscriptionsModel.calcularLimiteDeGasto({ salario: 0 })).toMatchObject({
+      percentualAtual: null,
+      limiteMensal: null,
+      acimaDoLimite: false,
+    });
+  });
+});
+
+describe("subscriptionsModel.getRevisaoDoMes", () => {
+  it("um cartão por assinatura ativa, da que mais pede atenção para a que menos pede", () => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Filmes", valorMensal: 40, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 2, nome: "Séries", valorMensal: 20, ativo: true, categoria: "streaming", tipo: "video" },
+      { id: 3, nome: "Academia", valorMensal: 90, ativo: true, categoria: "saude", tipo: "academia" },
+      { id: 4, nome: "Plano", valorMensal: 300, ativo: true, categoria: "saude", tipo: "plano_saude" },
+      { id: 5, nome: "Antiga", valorMensal: 10, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+    subscriptionsModel.verificarUso(3, { frequenciaUso: 1 }, em("2026-11-01")); // R$ 90 por ida: prejuízo
+    subscriptionsModel.addSubscription(
+      { nome: "Idiomas", valorCobrado: 30, tipo: "educacao", status: "teste", fimTeste: "2026-11-10" },
+      em("2026-11-01")
+    );
+
+    const revisao = subscriptionsModel.getRevisaoDoMes({ perfil: { valorHora: 20, salario: 4000 }, ...em("2026-11-02") });
+
+    expect(revisao).toMatchObject({ mes: "2026-11", valorHora: 20, gastoMensal: 450 });
+    expect(revisao.itens.map((i) => [i.assinatura.nome, i.sugestao])).toEqual([
+      ["Academia", "cancelar"],
+      ["Filmes", "pausar"],
+      ["Séries", "verificar"],
+      ["Plano", "manter"],
+      ["Idiomas", "decidir"],
+    ]);
+    expect(revisao.itens.find((i) => i.assinatura.nome === "Plano").verificacao).toEqual({ forma: "nenhuma" });
+  });
+
+  it("sem valor-hora no Perfil, a revisão vem sem ele", () => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "A", valorMensal: 10, ativo: true }]);
+    expect(subscriptionsModel.getRevisaoDoMes({ perfil: { valorHora: 0 } }).valorHora).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.getGuiaDeCancelamento", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Netflix", valorMensal: 51.9, ativo: true },
+      { id: 2, nome: "Tarifa do banco", valorMensal: 19.9, ativo: true, categoria: "financeiro", tipo: "conta_bancaria" },
+    ]);
+  });
+
+  it("serviço do catálogo traz o link oficial e só os direitos que valem para ele", () => {
+    const guia = subscriptionsModel.getGuiaDeCancelamento(1);
+
+    expect(guia).toMatchObject({
+      servico: { id: "netflix", nome: "Netflix" },
+      linkCancelamento: "https://help.netflix.com/pt/node/407",
+    });
+    expect(guia.direitos.map((d) => d.id)).toEqual(["arrependimento"]);
+    expect(guia.passos.length).toBeGreaterThan(0);
+    expect(guia.aviso).toContain("não é aconselhamento jurídico");
+  });
+
+  it("serviço regulado (banco) inclui o cancelamento com efeito imediato", () => {
+    const guia = subscriptionsModel.getGuiaDeCancelamento(2);
+
+    expect(guia).toMatchObject({ servico: null, linkCancelamento: null });
+    expect(guia.direitos.map((d) => d.baseLegal)).toEqual([
+      "Código de Defesa do Consumidor (Lei 8.078/1990), art. 49",
+      "Decreto 11.034/2022, art. 14",
+    ]);
+  });
+
+  it("retorna null quando o id não existe", () => {
+    expect(subscriptionsModel.getGuiaDeCancelamento(999)).toBeNull();
+  });
+});
+
+describe("subscriptionsModel.addSubscription (catálogo)", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([]);
+  });
+
+  it("reconhece o serviço pelo nome e completa categoria e tipo", () => {
+    expect(subscriptionsModel.addSubscription({ nome: "Spotify Família", valorCobrado: 40.9 })).toMatchObject({
+      categoria: "streaming",
+      tipo: "musica",
+      catalogoId: "spotify",
+    });
+  });
+
+  it("usa o serviço escolhido no autocomplete", () => {
+    expect(
+      subscriptionsModel.addSubscription({ nome: "Streaming da casa", valorCobrado: 25.9, catalogoId: "netflix" })
+    ).toMatchObject({ categoria: "streaming", tipo: "video", catalogoId: "netflix" });
+  });
+
+  it("o que a pessoa escolheu vale mais do que o catálogo", () => {
+    expect(
+      subscriptionsModel.addSubscription({ nome: "Netflix", valorCobrado: 25.9, categoria: "outros", tipo: null })
+    ).toMatchObject({ categoria: "outros", tipo: null });
+  });
+});
+
+describe("subscriptionsModel: projeção com IR regressivo", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([
+      { id: 1, nome: "Cancelada", valorMensal: 100, ativo: false, canceladaEm: "2026-10-01T15:00:00.000Z" },
+    ]);
+  });
+
+  it("o líquido é o bruto menos o imposto", () => {
+    subscriptionsModel.calcularProjecaoJuros(0.12).periodos.forEach((p) => {
+      expect(p.impostoRenda).toBeGreaterThan(0);
+      expect(p.montanteLiquido).toBeCloseTo(p.montante - p.impostoRenda, 2);
+    });
+  });
+
+  it("a alíquota média cai com o tempo: entre 20% e 22,5% em 1 ano, perto de 15% em 5 anos", () => {
+    const [umAno, , cincoAnos] = subscriptionsModel.calcularProjecaoJuros(0.12).periodos;
+    const aliquotaMedia = (p) => p.impostoRenda / p.rendimento;
+
+    expect(aliquotaMedia(umAno)).toBeGreaterThan(0.2);
+    expect(aliquotaMedia(umAno)).toBeLessThan(0.225);
+    expect(aliquotaMedia(cincoAnos)).toBeGreaterThan(0.15);
+    expect(aliquotaMedia(cincoAnos)).toBeLessThan(0.17);
+  });
+
+  it("com taxa zero não há imposto", () => {
+    subscriptionsModel.calcularProjecaoJuros(0).periodos.forEach((p) => expect(p.impostoRenda).toBe(0));
+  });
+
+  it("informa a origem da taxa", () => {
+    expect(
+      subscriptionsModel.calcularProjecaoJuros(0.1365, { fonteTaxa: "bcb", taxaAtualizadaEm: "2026-10-29" })
+    ).toMatchObject({ fonteTaxa: "bcb", taxaAtualizadaEm: "2026-10-29", taxaAnualPercentual: 13.65 });
+  });
+});
+
+describe("subscriptionsModel: custo invisível com reajuste e custo de oportunidade", () => {
+  beforeEach(() => {
+    subscriptionsModel._resetForTests([{ id: 1, nome: "A", valorMensal: 100, ativo: true }]);
+  });
+
+  it("sem reajuste e sem juros, os três valores são iguais", () => {
+    const [umAno] = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0, taxaAnual: 0 }).totais;
+    expect(umAno).toEqual({ meses: 12, valor: 1200, comReajuste: 1200, seInvestido: 1200 });
+  });
+
+  it("reajusta o preço pelo IPCA a cada 12 meses", () => {
+    const custo = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0.1, taxaAnual: 0 });
+
+    expect(custo.reajusteAnualPercentual).toBe(10);
+    expect(custo.totais[1].comReajuste).toBe(3972); // 1.200 + 1.320 + 1.452
+  });
+
+  it("mostra quanto o mesmo dinheiro viraria aplicado, já sem o IR", () => {
+    const [umAno] = subscriptionsModel.calcularCustoInvisivel({ ipca12m: 0, taxaAnual: 0.12 }).totais;
+
+    expect(umAno.seInvestido).toBe(1251.36);
+    expect(umAno.seInvestido).toBeLessThan(1264.65); // o bruto, antes do IR
   });
 });

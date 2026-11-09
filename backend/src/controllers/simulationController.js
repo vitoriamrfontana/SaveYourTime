@@ -118,6 +118,79 @@ const SimulationController = {
         error: error.message
       });
     }
+  },
+
+  criarMetaLiberdade: (req, res) => {
+    try {
+      const { titulo, categoria, valorAlvo, valorAtual } = req.body;
+      const novaMeta = SimulationModel.criarMetaLiberdade({
+        titulo,
+        categoria,
+        valorAlvo,
+        valorAtual
+      });
+      return res.status(201).json({
+        success: true,
+        data: novaMeta
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Erro ao criar meta de liberdade financeira.'
+      });
+    }
+  },
+
+  getMetasProgresso: (req, res) => {
+    try {
+      const { valorHora } = req.query;
+      const dados = SimulationModel.getMetasProgresso(valorHora);
+      return res.status(200).json({
+        success: true,
+        data: dados
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Erro ao calcular progresso das metas de liberdade.',
+        error: error.message
+      });
+    }
+  },
+
+  aportarMeta: (req, res) => {
+    try {
+      const { id } = req.params;
+      const { valor } = req.body;
+      const metaAtualizada = SimulationModel.aportarNaMeta(id, valor);
+      return res.status(200).json({
+        success: true,
+        data: metaAtualizada
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Erro ao realizar aporte na meta.'
+      });
+    }
+  },
+
+  simularImpactoMeta: (req, res) => {
+    try {
+      const { valorPoupado } = req.body;
+      const { valorHora } = req.query;
+      const resultado = SimulationModel.simularImpactoPoupanca(valorPoupado, valorHora);
+      return res.status(200).json({
+        success: true,
+        data: resultado
+      });
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Erro ao simular impacto nas metas de liberdade.',
+        error: error.message
+      });
+    }
   }
 };
 

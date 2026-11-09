@@ -12,6 +12,12 @@
  *
  * Sprint 3: card do Fogo da Disciplina no topo, período de reflexão
  * proporcional (48h / 7 dias / 30 dias) e lista separada por período.
+ *
+ * Sprint 4 (Antirrecaída): botão de ação rápida "Freio de Emergência" (modal
+ * de respiração + impacto imediato na renda, com bloqueio de compras) e a
+ * auditoria final dos gatilhos no rodapé: badge de Maturidade
+ * Comportamental, gráfico de rosca dos gatilhos superados e conversão x
+ * desistência.
  */
 
 import React, { useState } from 'react';
@@ -30,8 +36,11 @@ import CooldownSummaryCard from '../components/CooldownSummaryCard';
 import CooldownWishModal from '../components/CooldownWishModal';
 import CooldownOutcomeModal from '../components/CooldownOutcomeModal';
 import CooldownAuditPanel from '../components/CooldownAuditPanel';
+import CooldownPanicModal from '../components/CooldownPanicModal';
+import CooldownTriggersPanel from '../components/CooldownTriggersPanel';
 import DisciplineStreakCard from '../components/DisciplineStreakCard';
 import { colors } from '../theme/colors';
+import { formatarMinutosSegundos } from '../utils/antirrecaida';
 
 const MODAL_FECHADO = { visible: false, modo: 'novo', item: null };
 
@@ -62,6 +71,9 @@ export default function CooldownView() {
     categorias,
     periodos,
     streak,
+    gatilhos,
+    analytics,
+    freio,
     perfil,
     loading,
     refreshing,
@@ -71,12 +83,39 @@ export default function CooldownView() {
     adicionarDesejo,
     responderQuiz,
     registrarDesfecho,
+    acionarFreio,
   } = useCooldown();
 
   const [modalDesejo, setModalDesejo] = useState(MODAL_FECHADO);
   const [itemEncerrando, setItemEncerrando] = useState(null);
   const [resultadoDesfecho, setResultadoDesfecho] = useState(null);
   const [erroAcao, setErroAcao] = useState(null);
+  const [freioAberto, setFreioAberto] = useState(false);
+  const [resultadoFreio, setResultadoFreio] = useState(null);
+  const [erroFreio, setErroFreio] = useState(null);
+
+  const abrirFreio = () => {
+    setResultadoFreio(null);
+    setErroFreio(null);
+    setFreioAberto(true);
+  };
+
+  const fecharFreio = () => {
+    setFreioAberto(false);
+    setResultadoFreio(null);
+    setErroFreio(null);
+  };
+
+  const confirmarFreio = async (dados) => {
+    setErroFreio(null);
+    const resultado = await acionarFreio(dados);
+
+    if (resultado.success) setResultadoFreio(resultado);
+    else setErroFreio(resultado.error);
+  };
+
+  // "Desistir agora" de dentro do freio usa a mesma auditoria de desfecho
+  const desistirPeloFreio = (id) => registrarDesfecho(id, DESFECHOS.DESISTIU);
 
   const abrirNovoDesejo = () => {
     setErroAcao(null);
@@ -94,9 +133,10 @@ export default function CooldownView() {
   };
 
   const salvarDesejo = async (dados) => {
+    // O gatilho vai no mesmo corpo do questionário (o back-end guarda à parte)
     const resultado =
       modalDesejo.modo === 'quiz'
-        ? await responderQuiz(modalDesejo.item.id, dados.quiz)
+        ? await responderQuiz(modalDesejo.item.id, { ...dados.quiz, gatilho: dados.gatilho })
         : await adicionarDesejo(dados);
 
     if (resultado.success) fecharModalDesejo();
@@ -134,6 +174,30 @@ export default function CooldownView() {
   const cabecalho = (
     <View>
       <DisciplineStreakCard streak={streak} />
+
+      {/* Ação rápida para o pico da tentação */}
+      <TouchableOpacity
+        style={[styles.freio, freio.ativo && styles.freioAtivo]}
+        onPress={abrirFreio}
+        accessibilityRole="button"
+        accessibilityLabel={
+          freio.ativo
+            ? `Freio de emergência ativo, compras liberam em ${formatarMinutosSegundos(freio.segundosRestantes)}`
+            : 'Acionar o freio de emergência'
+        }
+      >
+        <Text style={styles.freioIcone}>{freio.ativo ? '🔒' : '🛑'}</Text>
+        <View style={styles.freioTextos}>
+          <Text style={styles.freioTitulo}>
+            {freio.ativo ? 'Freio de emergência ativo' : 'Freio de emergência'}
+          </Text>
+          <Text style={styles.freioDetalhe}>
+            {freio.ativo
+              ? `Compras bloqueadas por ${formatarMinutosSegundos(freio.segundosRestantes)} · toque para respirar de novo`
+              : 'Tentação forte agora? Respire e veja o impacto antes de comprar.'}
+          </Text>
+        </View>
+      </TouchableOpacity>
 
       <Text style={styles.subtitulo}>
         Todo desejo espera antes de virar compra: 48h para o dia a dia, 7 dias para compras
@@ -173,7 +237,12 @@ export default function CooldownView() {
         )}
         stickySectionHeadersEnabled={false}
         ListHeaderComponent={cabecalho}
-        ListFooterComponent={<CooldownAuditPanel auditoria={auditoria} />}
+        ListFooterComponent={
+          <View>
+            <CooldownTriggersPanel analytics={analytics} />
+            <CooldownAuditPanel auditoria={auditoria} />
+          </View>
+        }
         contentContainerStyle={{ paddingBottom: 24 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />
@@ -192,6 +261,7 @@ export default function CooldownView() {
         item={modalDesejo.item}
         categorias={categorias}
         periodos={periodos}
+        gatilhos={gatilhos}
         salario={perfil?.salario}
         valorHora={perfil?.valorHora}
         salvando={salvando}
@@ -206,9 +276,23 @@ export default function CooldownView() {
         resultado={resultadoDesfecho}
         salvando={salvando}
         erro={erroAcao}
+        bloqueioCompra={freio}
         onDesisti={() => confirmarDesfecho(DESFECHOS.DESISTIU)}
         onComprei={() => confirmarDesfecho(DESFECHOS.COMPROU)}
         onFechar={fecharEncerramento}
+      />
+
+      <CooldownPanicModal
+        visible={freioAberto}
+        items={items}
+        gatilhos={gatilhos}
+        resultado={resultadoFreio}
+        bloqueio={freio}
+        salvando={salvando}
+        erro={erroFreio}
+        onAcionar={confirmarFreio}
+        onDesistir={desistirPeloFreio}
+        onFechar={fecharFreio}
       />
     </View>
   );
@@ -229,6 +313,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     marginBottom: 16,
+  },
+  freio: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(248, 113, 113, 0.12)',
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  freioAtivo: {
+    backgroundColor: colors.surface,
+    borderStyle: 'dashed',
+  },
+  freioIcone: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  freioTextos: {
+    flex: 1,
+  },
+  freioTitulo: {
+    color: colors.textPrimary,
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  freioDetalhe: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 17,
   },
   botaoNovo: {
     backgroundColor: colors.accentStrong,

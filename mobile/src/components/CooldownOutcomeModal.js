@@ -3,6 +3,9 @@
  *
  * Duas etapas: primeiro a decisão ("desisti" x "comprei") e depois o feedback
  * visual, que soma a economia gerada quando o usuário desiste da compra.
+ *
+ * Sprint 4: com o freio de emergência ativo, "comprei" fica travado (o
+ * back-end também recusa, com 423) e só a desistência continua liberada.
  */
 
 import React from 'react';
@@ -15,6 +18,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
+import { formatarMinutosSegundos } from '../utils/antirrecaida';
 
 const NIVEL_CORES = {
   Baixo: colors.success,
@@ -32,11 +36,14 @@ export default function CooldownOutcomeModal({
   resultado = null,
   salvando = false,
   erro = null,
+  bloqueioCompra = null,
   onDesisti,
   onComprei,
   onFechar,
 }) {
   if (!item) return null;
+
+  const compraTravada = Boolean(bloqueioCompra?.ativo);
 
   const desfecho = resultado?.item?.desfecho ?? null;
   const desistiu = desfecho?.tipo === 'desistiu';
@@ -129,9 +136,19 @@ export default function CooldownOutcomeModal({
                     <Text style={styles.botaoDesistiTexto}>Desisti da compra</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.botaoComprei} onPress={onComprei}>
-                    <Text style={styles.botaoCompreiTexto}>Comprei mesmo assim</Text>
-                  </TouchableOpacity>
+                  {compraTravada ? (
+                    <View style={styles.travado} accessibilityRole="text">
+                      <Text style={styles.travadoTitulo}>🔒 Freio de emergência ativo</Text>
+                      <Text style={styles.travadoTexto}>
+                        Registrar compra libera em{' '}
+                        {formatarMinutosSegundos(bloqueioCompra.segundosRestantes)}
+                      </Text>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={styles.botaoComprei} onPress={onComprei}>
+                      <Text style={styles.botaoCompreiTexto}>Comprei mesmo assim</Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity style={styles.botaoVoltar} onPress={onFechar}>
                     <Text style={styles.botaoVoltarTexto}>Continuar refletindo</Text>
@@ -230,6 +247,25 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 14,
     fontWeight: '600',
+  },
+  travado: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  travadoTitulo: {
+    color: colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  travadoTexto: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginTop: 2,
   },
   botaoVoltar: {
     paddingVertical: 12,

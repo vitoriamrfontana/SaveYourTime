@@ -10,4 +10,5 @@ export const colors = {
   success: '#22c55e',
   warning: '#fbbf24',
   danger: '#f87171',
+  overlay: 'rgba(0, 0, 0, 0.6)',
 };

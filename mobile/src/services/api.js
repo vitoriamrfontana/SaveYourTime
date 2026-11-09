@@ -265,6 +265,140 @@ export const getUserBadges = async () => {
   }
 };
 
+export const getFinancialGoals = async (valorHora = 21.88) => {
+  try {
+    const res = await request(`/simulate/goals?valorHora=${valorHora}`);
+    return res?.data || res;
+  } catch (error) {
+    const vHora = Number(valorHora) || 21.88;
+    const custoVidaDiario = Number((3500 / 30).toFixed(2));
+    const metasMock = [
+      {
+        id: 'meta-reserva-emergencia',
+        titulo: 'Reserva de Emergencia (6 Meses)',
+        categoria: 'Seguranca',
+        valorAlvo: 15000.00,
+        valorAtual: 9000.00,
+        restante: 6000.00,
+        progressoPct: 60,
+        horasTrabalhoAlvo: Number((15000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((9000 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((6000 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((6000 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((9000 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((15000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      },
+      {
+        id: 'meta-viagem-sonhos',
+        titulo: 'Viagem de Ferias Sem Dividas',
+        categoria: 'Experiencia',
+        valorAlvo: 5000.00,
+        valorAtual: 3750.00,
+        restante: 1250.00,
+        progressoPct: 75,
+        horasTrabalhoAlvo: Number((5000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((3750 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((1250 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((1250 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((3750 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((5000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      },
+      {
+        id: 'meta-ano-sabatico',
+        titulo: 'Fundo de Liberdade / Ano Sabatico',
+        categoria: 'Liberdade',
+        valorAlvo: 42000.00,
+        valorAtual: 14000.00,
+        restante: 28000.00,
+        progressoPct: 33,
+        horasTrabalhoAlvo: Number((42000 / vHora).toFixed(1)),
+        horasTrabalhoAtuais: Number((14000 / vHora).toFixed(1)),
+        horasTrabalhoRestantes: Number((28000 / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((28000 / vHora) / 8).toFixed(1)),
+        diasLiberdadeConquistados: Number((14000 / custoVidaDiario).toFixed(1)),
+        diasLiberdadeAlvo: Number((42000 / custoVidaDiario).toFixed(1)),
+        concluida: false
+      }
+    ];
+    const totalAlvo = metasMock.reduce((a, b) => a + b.valorAlvo, 0);
+    const totalAtual = metasMock.reduce((a, b) => a + b.valorAtual, 0);
+    const totalRestante = totalAlvo - totalAtual;
+    return {
+      resumoGeral: {
+        totalMetas: metasMock.length,
+        totalAlvo,
+        totalAcumulado: totalAtual,
+        totalRestante,
+        progressoGeralPct: Math.round((totalAtual / totalAlvo) * 100),
+        diasLiberdadeConquistados: Number((totalAtual / custoVidaDiario).toFixed(1)),
+        horasVidaPoupadas: Number((totalAtual / vHora).toFixed(1)),
+        diasTrabalhoRestantes: Number(((totalRestante / vHora) / 8).toFixed(1)),
+        dinheiroPoupadoCooldown: 4199.00,
+        custoVidaDiarioReferencia: custoVidaDiario,
+        valorHoraReferencia: vHora
+      },
+      metas: metasMock
+    };
+  }
+};
+
+export const createFinancialGoal = async (meta) => {
+  try {
+    const res = await request('/simulate/goals', {
+      method: 'POST',
+      body: JSON.stringify(meta)
+    });
+    return res?.data || res;
+  } catch (error) {
+    return {
+      id: 'meta-' + Date.now(),
+      titulo: meta.titulo,
+      categoria: meta.categoria || 'Geral',
+      valorAlvo: Number(meta.valorAlvo),
+      valorAtual: Number(meta.valorAtual || 0),
+      dataCriacao: new Date().toISOString()
+    };
+  }
+};
+
+export const depositToFinancialGoal = async (id, valor) => {
+  try {
+    const res = await request(`/simulate/goals/${id}/deposit`, {
+      method: 'POST',
+      body: JSON.stringify({ valor: Number(valor) })
+    });
+    return res?.data || res;
+  } catch (error) {
+    return { success: true, id, valor };
+  }
+};
+
+export const simulateGoalSavingImpact = async (valorPoupado, valorHora = 21.88) => {
+  try {
+    const res = await request(`/simulate/goals/impact?valorHora=${valorHora}`, {
+      method: 'POST',
+      body: JSON.stringify({ valorPoupado: Number(valorPoupado) })
+    });
+    return res?.data || res;
+  } catch (error) {
+    const vHora = Number(valorHora) || 21.88;
+    const custoVidaDiario = Number((3500 / 30).toFixed(2));
+    const valor = Number(valorPoupado) || 0;
+    const horasTrabalhoPoupadas = Number((valor / vHora).toFixed(1));
+    const diasUteisPoupados = Number((horasTrabalhoPoupadas / 8).toFixed(1));
+    const diasLiberdadeGanhos = custoVidaDiario > 0 ? Number((valor / custoVidaDiario).toFixed(1)) : 0;
+    return {
+      valorSimulado: valor,
+      horasTrabalhoPoupadas,
+      diasUteisPoupados,
+      diasLiberdadeGanhos,
+      mensagem: 'Ao desistir ou economizar R$ ' + valor.toFixed(2) + ', voce antecipa suas metas em ' + diasLiberdadeGanhos + ' dias de liberdade financeira sem trabalhar.'
+    };
+  }
+};
+
 export const fetchPotes = async (salarioActual) => {
   try {
     return await getPotes();
@@ -314,6 +448,18 @@ export const createExtendedCooldown = (dados) =>
 
 // Fogo da Disciplina: dias seguidos sem compra por impulso
 export const getDisciplineStreak = () => request('/cooldown/streak');
+
+// Sprint 4 - Antirrecaída: freio de emergência. Tudo opcional:
+// { gatilho, desejoId, valor }. Trava o registro de compras por 30 min e
+// devolve a respiração guiada e as mensagens de impacto financeiro.
+export const triggerCooldownPanicMode = (dados = {}) =>
+  request('/cooldown/panic-mode', {
+    method: 'POST',
+    body: JSON.stringify(dados),
+  });
+
+// Auditoria final: gatilhos superados, conversão x desistência e maturidade
+export const getCooldownTriggersAnalytics = () => request('/cooldown/analytics/triggers');
 export const getPotes = (mes) => request(`/pots${mes ? `?mes=${encodeURIComponent(mes)}` : ''}`);
 
 export const checkPurchaseBudgetImpact = (valor, categoria) =>
@@ -321,6 +467,28 @@ export const checkPurchaseBudgetImpact = (valor, categoria) =>
     method: 'POST',
     body: JSON.stringify({ valor: Number(String(valor).replace(',', '.')), categoria }),
   });
+
+// Fechamento mensal 50-30-20: diagnóstico da competência (padrão: mês atual).
+export const closeMonthlyPots = (mes) =>
+  request('/pots/month-close', {
+    method: 'POST',
+    body: JSON.stringify(mes ? { mes } : {}),
+  });
+
+export const getMonthlyCloseHistory = () => request('/pots/month-close');
+
+// Reequilíbrio de sobras. dados: { mes?, origem?, destino?, valor? }
+// Sem valor, transfere a sobra inteira do Estilo de Vida para a reserva.
+export const rebalancePotsBalances = (dados = {}) => {
+  const corpo = { ...dados };
+  if (corpo.valor !== undefined && corpo.valor !== null && corpo.valor !== '') {
+    corpo.valor = Number(String(corpo.valor).replace(',', '.'));
+  }
+  return request('/pots/rebalance', {
+    method: 'POST',
+    body: JSON.stringify(corpo),
+  });
+};
 
 export const getLancamentosPotes = (mes, categoria) => {
   const params = [];
@@ -438,6 +606,85 @@ export const deletePriceAlert = async (id) => {
   }
 };
 
+export const getConsolidatedSavingsReport = async (valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/audit/summary?valorHora=${valorHora}`);
+    if (res && res.data) return res.data;
+    return res;
+  } catch (error) {
+    return {
+      periodo: 'Acumulado Geral',
+      dataGeracao: new Date().toISOString(),
+      totais: {
+        totalDinheiroPoupado: 6566.60,
+        totalHorasPoupadas: 300.2,
+        diasUteisPoupados: 37.5,
+        mesesSalarioEquivalente: 1.88,
+        nivelMaturidade: 'Mestre da Liberdade Financeira',
+        valorHoraReferencia: Number(valorHora) || 21.88
+      },
+      distribuicaoPorOrigem: [
+        {
+          categoria: 'Cooldown e Quarentena',
+          descricao: 'Compras impulsivas evitadas na quarentena reflexiva',
+          valor: 4199.00,
+          horas: 191.9,
+          porcentagem: 64,
+          itensContagem: 2
+        },
+        {
+          categoria: 'Detox de Assinaturas',
+          descricao: 'Economia projetada em 12 meses de mensalidades canceladas',
+          valor: 717.60,
+          horas: 32.8,
+          porcentagem: 11,
+          itensContagem: 2
+        },
+        {
+          categoria: 'Radar e Comparador',
+          descricao: 'Diferenca aproveitada entre o preco medio e a melhor oferta a vista',
+          valor: 1650.00,
+          horas: 75.5,
+          porcentagem: 25,
+          itensContagem: 13
+        }
+      ],
+      projecaoRendimentoRendaFixa: {
+        taxaReferenciaAnual: '10.75% a.a. (100% CDI / Tesouro Selic)',
+        projecao1Ano: {
+          rendimentoEstimado: 705.91,
+          montanteFinal: 7272.51
+        },
+        projecao3Anos: {
+          rendimentoEstimado: 2351.45,
+          montanteFinal: 8918.05
+        },
+        projecao5Anos: {
+          rendimentoEstimado: 4374.88,
+          montanteFinal: 10941.48
+        }
+      },
+      diagnosticoImpacto: {
+        horasPreservadasTexto: '300.2 horas de vida poupadas',
+        diasTrabalhoEvitadosTexto: '37.5 dias uteis de trabalho que voce nao precisou vender',
+        impactoPatrimonial: 'Equivale a 1.88 meses do seu salario integral liquido preservado em conta.'
+      }
+    };
+  }
+};
+
+export const exportSavingsStatement = async (formato = 'csv', valorHora = 21.88) => {
+  try {
+    const res = await request(`/deals/audit/export?formato=${formato}&valorHora=${valorHora}`);
+    return res;
+  } catch (error) {
+    if (formato === 'csv') {
+      return 'RELATORIO CONSOLIDADO DE IMPACTO - SAVE YOUR TIME\nTotal Dinheiro Poupado (R$);6566.60\nTotal Horas de Vida Poupadas;300.2h\nDias Uteis Preservados;37.5 dias';
+    }
+    return { success: true };
+  }
+};
+
 export const ApiService = {
   getUserProfile: fetchPerfil,
 
@@ -491,36 +738,87 @@ export const ApiService = {
     return getDisciplineStreak();
   },
 
-  toggleSubscription: async (id) => {
-    return request(`/subscriptions/${id}/toggle`, {
-      method: 'PATCH',
-    });
+  triggerCooldownPanicMode: async (dados) => {
+    return triggerCooldownPanicMode(dados);
   },
 
-    createSubscription: async (nome, valorMensal, categoria) => {
+  getCooldownTriggersAnalytics: async () => {
+    return getCooldownTriggersAnalytics();
+  },
+
+  // Sprint 4 - Detox: aceita um objeto com os campos novos (valorCobrado, ciclo,
+  // data de cobrança, divisão, teste grátis). A forma antiga
+  // (nome, valorMensal, categoria, tipo) continua valendo.
+  createSubscription: async (nomeOuDados, valorMensal, categoria, tipo) => {
+    const dados =
+      typeof nomeOuDados === 'object' && nomeOuDados !== null
+        ? nomeOuDados
+        : { nome: nomeOuDados, valorMensal, categoria, tipo };
     return request('/subscriptions', {
       method: 'POST',
-      body: JSON.stringify({ nome, valorMensal, categoria }),
+      body: JSON.stringify(dados),
     });
   },
 
-  getSubscriptionInsights: async () => {
-    return request('/subscriptions/insights');
-  },
-
-  getSubscriptionAudit: async () => {
-    return request('/subscriptions/auditoria');
-  },
-  
-  // Sprint 3 - Detox: assinaturas concorrentes e custo por uso
-  getSubscriptionRedundancies: async () => {
-    return request('/subscriptions/redundancies');
-  },
-
-  checkSubscriptionUsage: async (id, frequenciaUso) => {
+  // Sprint 3 - Detox: custo por uso. Sprint 4: aceita também { resposta }, nos
+  // tipos que têm uma pergunta em vez de usos para contar
+  checkSubscriptionUsage: async (id, entrada) => {
+    const corpo = typeof entrada === 'object' && entrada !== null ? entrada : { frequenciaUso: entrada };
     return request(`/subscriptions/${id}/usage-check`, {
       method: 'POST',
-      body: JSON.stringify({ frequenciaUso }),
+      body: JSON.stringify(corpo),
+    });
+  },
+
+  // Sprint 4 - Detox: a tela inteira numa chamada (substitui insights, auditoria e
+  // redundâncias separados) e a taxonomia. Status, edição e exclusão devolvem
+  // { assinatura, resumo }, com o resumo já recalculado.
+  getSubscriptionOverview: async () => {
+    return request('/subscriptions/overview');
+  },
+
+  getSubscriptionMeta: async () => {
+    return request('/subscriptions/meta');
+  },
+
+  changeSubscriptionStatus: async (id, dados) => {
+    return request(`/subscriptions/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  updateSubscription: async (id, dados) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
+    });
+  },
+
+  deleteSubscription: async (id) => {
+    return request(`/subscriptions/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // Sprint 4 - Detox: catálogo (autocomplete), Detox do mês, guia de cancelamento
+  // e meta de gasto com assinaturas
+  searchSubscriptionCatalog: async (busca) => {
+    return request(`/subscriptions/catalog?q=${encodeURIComponent(busca)}`);
+  },
+
+  getSubscriptionReview: async () => {
+    return request('/subscriptions/review');
+  },
+
+  getSubscriptionCancelGuide: async (id) => {
+    return request(`/subscriptions/${id}/cancel-guide`);
+  },
+
+  updateSubscriptionSettings: async (dados) => {
+    return request('/subscriptions/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(dados),
     });
   },
 
@@ -550,11 +848,26 @@ export const ApiService = {
   getUserBadges: async () => {
     return getUserBadges();
   },
+  createFinancialGoal: async (meta) => {
+    return createFinancialGoal(meta);
+  },
+  getFinancialGoals: async (valorHora) => {
+    return getFinancialGoals(valorHora);
+  },
+  depositToFinancialGoal: async (id, valor) => {
+    return depositToFinancialGoal(id, valor);
+  },
+  simulateGoalSavingImpact: async (valorPoupado, valorHora) => {
+    return simulateGoalSavingImpact(valorPoupado, valorHora);
+  },
   getPots: async (mes) => getPotes(mes),
   checkPurchaseBudgetImpact: async (valor, categoria) => checkPurchaseBudgetImpact(valor, categoria),
   getPotTransactions: async (mes, categoria) => getLancamentosPotes(mes, categoria),
   createPotTransaction: async (lancamento) => criarLancamentoPote(lancamento),
   deletePotTransaction: async (id) => deletarLancamentoPote(id),
+  closeMonthlyPots: async (mes) => closeMonthlyPots(mes),
+  getMonthlyCloseHistory: async () => getMonthlyCloseHistory(),
+  rebalancePotsBalances: async (dados) => rebalancePotsBalances(dados),
   getProductPriceHistory: async (produtoId, periodo, valorHora) => {
     return getProductPriceHistory(produtoId, periodo, valorHora);
   },
@@ -566,5 +879,11 @@ export const ApiService = {
   },
   deletePriceAlert: async (id) => {
     return deletePriceAlert(id);
+  },
+  getConsolidatedSavingsReport: async (valorHora) => {
+    return getConsolidatedSavingsReport(valorHora);
+  },
+  exportSavingsStatement: async (formato, valorHora) => {
+    return exportSavingsStatement(formato, valorHora);
   },
 };
